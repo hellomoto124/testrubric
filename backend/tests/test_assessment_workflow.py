@@ -91,8 +91,9 @@ def test_deep_agent_constructs_with_registered_openai_profile_without_network():
 
     assert agent is not None
     tool_names = agent.nodes["tools"].bound._tools_by_name
-    assert "general-purpose" not in tool_names
-    assert {"read_current_task", "submit_candidate"}.issubset(tool_names)
+    # Deep Agents requires a StateBackend-backed read_file tool internally; the
+    # profile excludes and rejects it before it reaches the model.
+    assert set(tool_names) == {"task", "read_current_task", "submit_candidate", "read_file"}
 
 
 def test_worker_is_not_started_by_api_lifespan_and_demo_result_uses_reviewed_states():

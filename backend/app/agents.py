@@ -2,6 +2,7 @@
 
 import os
 
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.profiles import (
     GeneralPurposeSubagentProfile,
     HarnessProfile,
@@ -30,7 +31,10 @@ def build_deep_agent(model, task_loader, candidate_sink, creator=None):
     tools = [read_current_task, submit_candidate]
     register_harness_profile(
         "openai",
-        HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)),
+        HarnessProfile(
+            excluded_tools=frozenset({"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"}),
+            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+        ),
     )
     subagents = [
         {"name": name, "description": description, "system_prompt": "Use only the supplied tools. Return concise assessment work.", "tools": tools}
@@ -45,6 +49,7 @@ def build_deep_agent(model, task_loader, candidate_sink, creator=None):
         tools=tools,
         subagents=subagents,
         system_prompt="Coordinate the three specialists. Never access files, SQL, or anything outside the provided tools.",
+        middleware=[FilesystemMiddleware(tools=["read_file"])],
     )
 
 
