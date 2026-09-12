@@ -47,11 +47,9 @@ def test_assessment_job_is_queued_and_persisted_with_sse_event():
             json={"student_id": 1, "skill_code": skill_code, "evidence_refs": [evidence["id"]]},
         )
         job = client.get(f"/api/assessment-jobs/{created.json()['id']}")
-        events = client.get(f"/api/assessment-jobs/{created.json()['id']}/events")
 
     assert created.status_code == 201
-    assert job.json()["status"] in {"queued", "running", "completed"}
-    assert "event: status" in events.text
+    assert job.json()["status"] == "queued"
 
 
 def test_deep_agent_receives_exactly_the_three_restricted_subagents():
@@ -68,3 +66,79 @@ def test_deep_agent_receives_exactly_the_three_restricted_subagents():
     assert [agent["name"] for agent in captured["subagents"]] == ["evidence_extractor", "rubric_assessor", "feedback_writer"]
     assert {tool.name for tool in captured["tools"]} == {"read_current_task", "submit_candidate"}
     assert all({tool.name for tool in agent["tools"]} == {"read_current_task", "submit_candidate"} for agent in captured["subagents"])
+
+
+def test_worker_is_not_started_by_api_lifespan_and_demo_result_uses_reviewed_states():
+    with TestClient(app) as client:
+        evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "足够长的可观察证据。"}).json()
+        code = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": code, "evidence_refs": [evidence["id"]]}).json()
+        assert client.get(f"/api/assessment-jobs/{job['id']}").json()["status"] == "queued"
+
+    from app.worker import process_one_job
+
+    completed = process_one_job()
+    assert completed["status"] == "succeeded"
+    assert completed["results"][0]["status"] in {"assessed", "insufficient_evidence"}
+
+
+def test_result_revision_uses_result_id_and_rejects_invalid_contract():
+    with TestClient(app) as client:
+        evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "学生使用证据解释答案。"}).json()
+        code = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": code, "evidence_refs": [evidence["id"]]}).json()
+    from app.worker import process_one_job
+
+    completed = process_one_job()
+    result_id = completed["results"][0]["id"]
+    payload = completed["results"][0] | {"confidence": 0.8, "model_run_id": "teacher-review"}
+    with TestClient(app) as client:
+        revised = client.patch(f"/api/assessments/{result_id}", json=payload)
+        invalid = client.patch(f"/api/assessments/{result_id}", json=payload | {"confidence": True})
+        events = client.get(f"/api/assessment-jobs/{completed['id']}/events")
+
+    assert revised.status_code == 200
+    assert len(revised.json()["results"]) == 2
+    assert invalid.status_code == 422
+    assert "succeeded" in events.text
+
+
+def test_image_context_is_data_url_only_when_vision_is_enabled(monkeypatch):
+    monkeypatch.setenv("VISION_ENABLED", "true")
+    with TestClient(app) as client:
+        evidence = client.post(
+            "/api/evidence",
+            data={"student_id": "1", "evidence_type": "student_work"},
+            files={"file": ("work.png", b"png-bytes", "image/png")},
+        ).json()
+        code = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": code, "evidence_refs": [evidence["id"]]}).json()
+
+    from app.database import task_context
+
+    context = task_context(job["id"])
+    assert context["evidence"][0]["image_data_url"].startswith("data:image/png;base64,")
+    assert "content" not in context["evidence"][0]
+
+
+def test_real_agent_path_audits_all_subagents_and_candidate(monkeypatch):
+    monkeypatch.setenv("DEMO_AGENT_MODE", "false")
+    with TestClient(app) as client:
+        evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "学生完整解释了策略和证据。"}).json()
+        code = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": code, "evidence_refs": [evidence["id"]]})
+
+    class FakeAgent:
+        def __init__(self, sink, context):
+            self.sink, self.context = sink, context
+
+        def stream(self, *_args, **_kwargs):
+            for name in ("evidence_extractor", "rubric_assessor", "feedback_writer"):
+                yield {name: {}}
+            self.sink({"status": "assessed", "level": 3, "confidence": 0.7, "evidence_refs": self.context["job"]["evidence_refs"], "rationale": "fake", "next_step": "next", "rubric_version": self.context["rubric"]["rubric_version"], "model_run_id": "fake-run"})
+
+    from app.worker import process_one_job
+
+    completed = process_one_job(lambda _model, loader, sink: FakeAgent(sink, loader()), lambda: object())
+    details = [event["detail"] for event in completed["events"]]
+    assert {"evidence_extractor", "rubric_assessor", "feedback_writer", "submitted"}.issubset(details)

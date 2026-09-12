@@ -1,6 +1,6 @@
 import json
 import os
-import asyncio
+from io import BytesIO
 from urllib.parse import parse_qs
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,8 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from .database import create_evidence as save_evidence
-from .database import append_result, create_job, current_rubric as load_current_rubric, get_job, initialize
-from .worker import process_one_job
+from .database import append_revision, create_job, current_rubric as load_current_rubric, get_job, initialize
 
 
 RUBRIC = json.loads((Path(__file__).parent / "data" / "future_9.json").read_text(encoding="utf-8"))
@@ -21,15 +20,7 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf", ".jpg", ".jpeg", ".png"}
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize(RUBRIC)
-    async def worker_loop():
-        while True:
-            process_one_job()
-            await asyncio.sleep(0.1)
-    task = asyncio.create_task(worker_loop())
-    try:
-        yield
-    finally:
-        task.cancel()
+    yield
 
 
 app = FastAPI(lifespan=lifespan)
@@ -75,6 +66,10 @@ async def create_evidence(request: Request) -> dict:
         media_type = uploaded.content_type
         if suffix in {".txt", ".md"} and not text:
             text = content.decode("utf-8", errors="replace")
+        if suffix == ".pdf" and not text:
+            from pypdf import PdfReader
+
+            text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
     if not text.strip() and not content:
         raise HTTPException(422, "invalid evidence")
     try:
@@ -101,16 +96,28 @@ def get_assessment_job(job_id: int) -> dict:
 
 
 @app.get("/api/assessment-jobs/{job_id}/events")
-def assessment_events(job_id: int):
+async def assessment_events(job_id: int):
     job = get_job(job_id)
     if not job:
         raise HTTPException(404, "job does not exist")
-    return StreamingResponse(iter([f"event: status\ndata: {json.dumps({'status': job['status']})}\n\n"]), media_type="text/event-stream")
+    async def stream():
+        last = None
+        while True:
+            current = get_job(job_id)
+            state = (current["status"], len(current["events"]))
+            if state != last:
+                yield "event: status\ndata: " + json.dumps({"status": current["status"], "events": current["events"]}, ensure_ascii=False) + "\n\n"
+                last = state
+            if current["status"] in {"succeeded", "failed"}:
+                return
+            import asyncio
+            await asyncio.sleep(0.1)
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-@app.patch("/api/assessment-jobs/{job_id}/assessment")
-async def revise_assessment(job_id: int, request: Request) -> dict:
+@app.patch("/api/assessments/{assessment_result_id}")
+async def revise_assessment(assessment_result_id: int, request: Request) -> dict:
     try:
-        return append_result(job_id, await request.json(), "manual_revision")
+        return append_revision(assessment_result_id, await request.json())
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

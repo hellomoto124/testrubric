@@ -36,8 +36,13 @@ def initialize(rubric: dict) -> None:
             CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, evidence_type TEXT NOT NULL, text TEXT NOT NULL, filename TEXT, media_type TEXT, content BLOB, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS assessment_jobs (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL, skill_code TEXT NOT NULL, evidence_refs TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, engine TEXT, error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS assessment_results (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, revision INTEGER NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(job_id, revision));
+            CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, stage TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """
         )
+        try:
+            connection.execute("ALTER TABLE assessment_jobs ADD COLUMN status_detail TEXT")
+        except sqlite3.OperationalError:
+            pass
         if connection.execute("SELECT count(*) FROM schools").fetchone()[0]:
             return
         connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("模拟测试学校",))
@@ -109,10 +114,12 @@ def get_job(job_id: int) -> Optional[dict]:
         row = connection.execute("SELECT id, student_id, skill_code, evidence_refs, status, attempts, engine, error FROM assessment_jobs WHERE id = ?", (job_id,)).fetchone()
         if not row:
             return None
-        results = [json.loads(result) for (result,) in connection.execute("SELECT result FROM assessment_results WHERE job_id = ? ORDER BY revision", (job_id,))]
+        results = [dict(json.loads(result), id=result_id, revision=revision) for result_id, revision, result in connection.execute("SELECT id, revision, result FROM assessment_results WHERE job_id = ? ORDER BY revision", (job_id,))]
+        events = [dict(zip(("id", "stage", "detail"), event)) for event in connection.execute("SELECT id, stage, detail FROM job_events WHERE job_id = ? ORDER BY id", (job_id,))]
     job = dict(zip(("id", "student_id", "skill_code", "evidence_refs", "status", "attempts", "engine", "error"), row))
     job["evidence_refs"] = json.loads(job["evidence_refs"])
     job["results"] = results
+    job["events"] = events
     return job
 
 
@@ -124,16 +131,22 @@ def append_result(job_id: int, result: dict, engine: str) -> dict:
         _validate_result(connection, row[0], result)
         revision = connection.execute("SELECT count(*) FROM assessment_results WHERE job_id = ?", (job_id,)).fetchone()[0] + 1
         connection.execute("INSERT INTO assessment_results (job_id, revision, result) VALUES (?, ?, ?)", (job_id, revision, json.dumps(result, ensure_ascii=False)))
-        connection.execute("UPDATE assessment_jobs SET status = 'completed', engine = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (engine, job_id))
+        connection.execute("UPDATE assessment_jobs SET status = 'succeeded', engine = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (engine, job_id))
+        connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, ?, ?)", (job_id, "succeeded", engine))
     return get_job(job_id)
 
 
 def _validate_result(connection, student_id: int, result: dict) -> None:
     required = {"status", "level", "confidence", "evidence_refs", "rationale", "next_step", "rubric_version", "model_run_id"}
-    if not required.issubset(result) or not isinstance(result["evidence_refs"], list) or not result["evidence_refs"] or not result["rationale"] or not result["next_step"]:
+    if not required.issubset(result) or result["status"] not in {"assessed", "insufficient_evidence"} or not isinstance(result["confidence"], (int, float)) or isinstance(result["confidence"], bool) or not 0 <= result["confidence"] <= 1 or not isinstance(result["evidence_refs"], list) or not result["evidence_refs"] or len(set(result["evidence_refs"])) != len(result["evidence_refs"]) or not result["rationale"] or not result["next_step"] or not result["model_run_id"]:
         raise ValueError("invalid assessment result")
-    if result["level"] is not None and (not isinstance(result["level"], int) or not connection.execute("SELECT 1 FROM levels WHERE level = ?", (result["level"],)).fetchone()):
+    version = connection.execute("SELECT rubric_version FROM rubrics").fetchone()[0]
+    if result["rubric_version"] != version:
+        raise ValueError("invalid rubric version")
+    if result["status"] == "assessed" and (not isinstance(result["level"], int) or isinstance(result["level"], bool) or not connection.execute("SELECT 1 FROM levels WHERE level = ?", (result["level"],)).fetchone()):
         raise ValueError("invalid level")
+    if result["status"] == "insufficient_evidence" and result["level"] is not None:
+        raise ValueError("insufficient evidence requires null level")
     refs = result["evidence_refs"]
     marks = ",".join("?" for _ in refs)
     if connection.execute("SELECT count(*) FROM evidence WHERE student_id = ? AND id IN (" + marks + ")", [student_id] + refs).fetchone()[0] != len(set(refs)):
@@ -142,12 +155,14 @@ def _validate_result(connection, student_id: int, result: dict) -> None:
 
 def claim_next_job() -> Optional[dict]:
     with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = connection.execute("SELECT id FROM assessment_jobs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
         if not row:
             return None
         claimed = connection.execute("UPDATE assessment_jobs SET status = 'running', attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'", row)
         if not claimed.rowcount:
             return None
+        connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, ?, ?)", (row[0], "running", "claimed"))
     return get_job(row[0])
 
 
@@ -156,6 +171,7 @@ def fail_job(job_id: int, error: str) -> None:
         attempts = connection.execute("SELECT attempts FROM assessment_jobs WHERE id = ?", (job_id,)).fetchone()[0]
         status = "failed" if attempts >= 3 else "queued"  # initial attempt plus two retries
         connection.execute("UPDATE assessment_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (status, error, job_id))
+        connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, ?, ?)", (job_id, status, error))
 
 
 def task_context(job_id: int) -> dict:
@@ -164,5 +180,32 @@ def task_context(job_id: int) -> dict:
         raise ValueError("job does not exist")
     with connect() as connection:
         marks = ",".join("?" for _ in job["evidence_refs"])
-        evidence = [dict(zip(("id", "evidence_type", "text", "filename", "media_type"), row)) for row in connection.execute("SELECT id, evidence_type, text, filename, media_type FROM evidence WHERE id IN (" + marks + ")", job["evidence_refs"])]
+        evidence = [dict(zip(("id", "evidence_type", "text", "filename", "media_type", "content"), row)) for row in connection.execute("SELECT id, evidence_type, text, filename, media_type, content FROM evidence WHERE id IN (" + marks + ")", job["evidence_refs"])]
+    for item in evidence:
+        if item["media_type"] in {"image/jpeg", "image/png"} and item["content"]:
+            import base64
+            item["image_data_url"] = "data:" + item["media_type"] + ";base64," + base64.b64encode(item["content"]).decode()
+        item.pop("content", None)
     return {"job": job, "evidence": evidence, "rubric": current_rubric()}
+
+
+def recover_running_jobs() -> int:
+    with connect() as connection:
+        rows = connection.execute("SELECT id FROM assessment_jobs WHERE status = 'running'").fetchall()
+        for (job_id,) in rows:
+            connection.execute("UPDATE assessment_jobs SET status = 'queued', error = 'worker restart recovery' WHERE id = ?", (job_id,))
+            connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, ?, ?)", (job_id, "queued", "worker restart recovery"))
+    return len(rows)
+
+
+def append_revision(result_id: int, result: dict) -> dict:
+    with connect() as connection:
+        row = connection.execute("SELECT job_id FROM assessment_results WHERE id = ?", (result_id,)).fetchone()
+    if not row:
+        raise ValueError("assessment result does not exist")
+    return append_result(row[0], {key: value for key, value in result.items() if key not in {"id", "revision"}}, "manual_revision")
+
+
+def record_event(job_id: int, stage: str, detail: str) -> None:
+    with connect() as connection:
+        connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, ?, ?)", (job_id, stage, detail))
