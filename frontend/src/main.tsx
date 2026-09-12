@@ -1,3 +1,5 @@
 import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./style.css";
 
-createRoot(document.getElementById("root")!).render(<h1>Future 9 模拟测试数据</h1>);
+createRoot(document.getElementById("root")!).render(<App />);
