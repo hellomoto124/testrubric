@@ -2,7 +2,11 @@
 
 import os
 
-from deepagents.profiles import GeneralPurposeSubagentProfile, HarnessProfile
+from deepagents.profiles import (
+    GeneralPurposeSubagentProfile,
+    HarnessProfile,
+    register_harness_profile,
+)
 from langchain_core.tools import tool
 
 
@@ -24,6 +28,10 @@ def build_deep_agent(model, task_loader, candidate_sink, creator=None):
         return candidate_sink(candidate)
 
     tools = [read_current_task, submit_candidate]
+    register_harness_profile(
+        "openai",
+        HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)),
+    )
     subagents = [
         {"name": name, "description": description, "system_prompt": "Use only the supplied tools. Return concise assessment work.", "tools": tools}
         for name, description in (
@@ -37,7 +45,6 @@ def build_deep_agent(model, task_loader, candidate_sink, creator=None):
         tools=tools,
         subagents=subagents,
         system_prompt="Coordinate the three specialists. Never access files, SQL, or anything outside the provided tools.",
-        middleware=[HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False))],
     )
 
 

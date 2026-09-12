@@ -79,6 +79,22 @@ def test_deep_agent_receives_exactly_the_three_restricted_subagents():
     assert all({tool.name for tool in agent["tools"]} == {"read_current_task", "submit_candidate"} for agent in captured["subagents"])
 
 
+def test_deep_agent_constructs_with_registered_openai_profile_without_network():
+    from app.agents import build_deep_agent
+    from langchain_openai import ChatOpenAI
+
+    agent = build_deep_agent(
+        ChatOpenAI(model="test", api_key="placeholder", base_url="http://127.0.0.1:9/v1"),
+        lambda: {"evidence": [], "rubric": {}},
+        lambda candidate: candidate,
+    )
+
+    assert agent is not None
+    tool_names = agent.nodes["tools"].bound._tools_by_name
+    assert "general-purpose" not in tool_names
+    assert {"read_current_task", "submit_candidate"}.issubset(tool_names)
+
+
 def test_worker_is_not_started_by_api_lifespan_and_demo_result_uses_reviewed_states():
     with TestClient(app) as client:
         evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "足够长的可观察证据。"}).json()
