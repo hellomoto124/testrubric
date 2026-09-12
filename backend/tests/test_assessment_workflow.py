@@ -1,6 +1,5 @@
-from fastapi.testclient import TestClient
-
 from app.main import app
+from fastapi.testclient import TestClient
 
 
 def test_evidence_upload_persists_text_for_a_simulated_student():
@@ -33,6 +32,18 @@ def test_evidence_upload_accepts_txt_student_work():
     assert response.status_code == 201
     assert response.json()["filename"] == "work.txt"
     assert response.json()["text"] == "我的解题过程"
+
+
+def test_malformed_pdf_is_rejected_with_422():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/evidence",
+            data={"student_id": "1", "evidence_type": "student_work"},
+            files={"file": ("broken.pdf", b"not a pdf", "application/pdf")},
+        )
+
+    assert response.status_code == 422
+    assert "PDF" in response.json()["detail"]
 
 
 def test_assessment_job_is_queued_and_persisted_with_sse_event():
@@ -86,7 +97,7 @@ def test_result_revision_uses_result_id_and_rejects_invalid_contract():
     with TestClient(app) as client:
         evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "学生使用证据解释答案。"}).json()
         code = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
-        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": code, "evidence_refs": [evidence["id"]]}).json()
+        client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": code, "evidence_refs": [evidence["id"]]})
     from app.worker import process_one_job
 
     completed = process_one_job()
@@ -95,11 +106,15 @@ def test_result_revision_uses_result_id_and_rejects_invalid_contract():
     with TestClient(app) as client:
         revised = client.patch(f"/api/assessments/{result_id}", json=payload)
         invalid = client.patch(f"/api/assessments/{result_id}", json=payload | {"confidence": True})
+        invalid_text = client.patch(f"/api/assessments/{result_id}", json=payload | {"rationale": 1})
+        invalid_ref = client.patch(f"/api/assessments/{result_id}", json=payload | {"evidence_refs": [True]})
         events = client.get(f"/api/assessment-jobs/{completed['id']}/events")
 
     assert revised.status_code == 200
     assert len(revised.json()["results"]) == 2
     assert invalid.status_code == 422
+    assert invalid_text.status_code == 422
+    assert invalid_ref.status_code == 422
     assert "succeeded" in events.text
 
 
@@ -151,3 +166,16 @@ def test_real_agent_path_audits_all_subagents_and_candidate(monkeypatch):
     completed = process_one_job(lambda _model, loader, sink: FakeAgent(sink, loader()), lambda: object())
     details = [event["detail"] for event in completed["events"]]
     assert {"evidence_extractor:completed", "rubric_assessor:completed", "feedback_writer:completed", "submitted"}.issubset(details)
+
+
+def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
+    from app import worker
+
+    calls = []
+    monkeypatch.setattr(worker, "recover_running_jobs", lambda: calls.append("recover"))
+    monkeypatch.setattr(worker, "process_one_job", lambda: calls.append("job") or {"id": 1})
+    states = iter([False, True])
+
+    worker.run_worker(lambda: next(states), poll_interval=0)
+
+    assert calls == ["recover", "job"]

@@ -1,7 +1,15 @@
 import os
+import signal
 import time
 
-from .database import append_result, claim_next_job, fail_job, get_job, record_event, recover_running_jobs, task_context
+from .database import (
+    append_result,
+    claim_next_job,
+    fail_job,
+    record_event,
+    recover_running_jobs,
+    task_context,
+)
 
 
 def process_one_job(agent_builder=None, model_factory=None):
@@ -34,7 +42,7 @@ def process_one_job(agent_builder=None, model_factory=None):
                 _ = list(handle.tool_calls)
                 _ = handle.output
                 status = handle.status
-            except Exception:
+            except Exception:  # noqa: BLE001 - external stream projection may fail
                 status = "failed"
             record_event(job["id"], "subagent", handle.name + ":" + status)
             if handle.name in required and status == "completed":
@@ -43,16 +51,30 @@ def process_one_job(agent_builder=None, model_factory=None):
             raise RuntimeError("Deep Agents did not complete required subagents and candidate submission")
         record_event(job["id"], "candidate", "submitted")
         return append_result(job["id"], submitted[-1], "deepagents")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - failed jobs are retried
         fail_job(job["id"], str(exc))
         return None
 
 
-def main():
+def run_worker(should_stop, poll_interval=0.1):
     recover_running_jobs()
-    while True:
+    while not should_stop():
         process_one_job()
-        time.sleep(0.1)
+        if should_stop():
+            return
+        time.sleep(poll_interval)
+
+
+def main():
+    stopping = False
+
+    def stop(*_args):
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    run_worker(lambda: stopping)
 
 
 if __name__ == "__main__":

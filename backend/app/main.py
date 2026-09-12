@@ -1,16 +1,16 @@
 import json
 import os
-from io import BytesIO
-from urllib.parse import parse_qs
 from contextlib import asynccontextmanager
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from .database import append_revision, create_job, get_job, initialize
 from .database import create_evidence as save_evidence
-from .database import append_revision, create_job, current_rubric as load_current_rubric, get_job, initialize
-
+from .database import current_rubric as load_current_rubric
 
 RUBRIC = json.loads((Path(__file__).parent / "data" / "future_9.json").read_text(encoding="utf-8"))
 MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
@@ -68,8 +68,14 @@ async def create_evidence(request: Request) -> dict:
             text = content.decode("utf-8", errors="replace")
         if suffix == ".pdf" and not text:
             from pypdf import PdfReader
+            from pypdf.errors import FileNotDecryptedError, PdfReadError, PdfStreamError
 
-            text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
+            try:
+                text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
+            except (FileNotDecryptedError, PdfReadError, PdfStreamError) as exc:
+                raise HTTPException(422, "PDF cannot be read") from exc
+            if not text.strip():
+                raise HTTPException(422, "PDF has no extractable text")
     if not text.strip() and not content:
         raise HTTPException(422, "invalid evidence")
     try:

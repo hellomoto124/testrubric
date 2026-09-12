@@ -1,9 +1,7 @@
-import sqlite3
 import json
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
-
 
 DATABASE_PATH = Path(__file__).parent / "data" / "app.db"
 
@@ -39,10 +37,6 @@ def initialize(rubric: dict) -> None:
             CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, stage TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """
         )
-        try:
-            connection.execute("ALTER TABLE assessment_jobs ADD COLUMN status_detail TEXT")
-        except sqlite3.OperationalError:
-            pass
         if connection.execute("SELECT count(*) FROM schools").fetchone()[0]:
             return
         connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("模拟测试学校",))
@@ -84,7 +78,7 @@ def current_rubric() -> dict:
     return dict(zip(("rubric_version", "source_url", "license_note", "local_adaptation"), rubric)) | {"competencies": competencies}
 
 
-def create_evidence(student_id: int, evidence_type: str, text: str, filename: Optional[str] = None, media_type: Optional[str] = None, content: Optional[bytes] = None) -> dict:
+def create_evidence(student_id: int, evidence_type: str, text: str, filename: str | None = None, media_type: str | None = None, content: bytes | None = None) -> dict:
     with connect() as connection:
         if not connection.execute("SELECT 1 FROM students WHERE id = ?", (student_id,)).fetchone():
             raise ValueError("student does not exist")
@@ -109,7 +103,7 @@ def create_job(student_id: int, skill_code: str, evidence_refs: list) -> dict:
     return get_job(job_id)
 
 
-def get_job(job_id: int) -> Optional[dict]:
+def get_job(job_id: int) -> dict | None:
     with connect() as connection:
         row = connection.execute("SELECT id, student_id, skill_code, evidence_refs, status, attempts, engine, error FROM assessment_jobs WHERE id = ?", (job_id,)).fetchone()
         if not row:
@@ -138,7 +132,8 @@ def append_result(job_id: int, result: dict, engine: str) -> dict:
 
 def _validate_result(connection, student_id: int, result: dict) -> None:
     required = {"status", "level", "confidence", "evidence_refs", "rationale", "next_step", "rubric_version", "model_run_id"}
-    if not required.issubset(result) or result["status"] not in {"assessed", "insufficient_evidence"} or not isinstance(result["confidence"], (int, float)) or isinstance(result["confidence"], bool) or not 0 <= result["confidence"] <= 1 or not isinstance(result["evidence_refs"], list) or not result["evidence_refs"] or len(set(result["evidence_refs"])) != len(result["evidence_refs"]) or not result["rationale"] or not result["next_step"] or not result["model_run_id"]:
+    text_fields = ("rationale", "next_step", "model_run_id")
+    if not required.issubset(result) or result["status"] not in {"assessed", "insufficient_evidence"} or not isinstance(result["confidence"], (int, float)) or isinstance(result["confidence"], bool) or not 0 <= result["confidence"] <= 1 or not isinstance(result["evidence_refs"], list) or not result["evidence_refs"] or any(type(ref) is not int for ref in result["evidence_refs"]) or len(set(result["evidence_refs"])) != len(result["evidence_refs"]) or any(not isinstance(result[field], str) or not result[field].strip() for field in text_fields):
         raise ValueError("invalid assessment result")
     version = connection.execute("SELECT rubric_version FROM rubrics").fetchone()[0]
     if result["rubric_version"] != version:
@@ -153,7 +148,7 @@ def _validate_result(connection, student_id: int, result: dict) -> None:
         raise ValueError("invalid evidence refs")
 
 
-def claim_next_job() -> Optional[dict]:
+def claim_next_job() -> dict | None:
     with connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute("SELECT id FROM assessment_jobs WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
