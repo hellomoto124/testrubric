@@ -1,0 +1,7 @@
+.venv/
+.codegraph/
+__pycache__/
+*.pyc
+backend/app/data/app.db
+node_modules/
+frontend/node_modules/
