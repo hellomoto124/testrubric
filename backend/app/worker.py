@@ -26,16 +26,23 @@ def process_one_job(agent_builder=None, model_factory=None):
             return append_result(job["id"], result, "demo_deterministic")
         from .agents import build_deep_agent, configured_model
 
-        seen, submitted = set(), []
-        agent = (agent_builder or build_deep_agent)((model_factory or configured_model)(), lambda: context, lambda result: submitted.append(result) or append_result(job["id"], result, "deepagents"))
-        for update in agent.stream({"messages": [{"role": "user", "content": "Use evidence_extractor, rubric_assessor, then feedback_writer; submit exactly one candidate."}]}, stream_mode="updates"):
-            for name in set(update) & {"evidence_extractor", "rubric_assessor", "feedback_writer"}:
-                seen.add(name)
-                record_event(job["id"], "subagent", name)
-        if seen != {"evidence_extractor", "rubric_assessor", "feedback_writer"} or not submitted:
+        required, seen, submitted = {"evidence_extractor", "rubric_assessor", "feedback_writer"}, set(), []
+        agent = (agent_builder or build_deep_agent)((model_factory or configured_model)(), lambda: context, lambda result: submitted.append(result) or {"accepted": True})
+        stream = agent.stream_events({"messages": [{"role": "user", "content": "Use evidence_extractor, rubric_assessor, then feedback_writer; submit exactly one candidate."}]}, version="v3")
+        for handle in stream.subagents:
+            try:
+                _ = list(handle.tool_calls)
+                _ = handle.output
+                status = handle.status
+            except Exception:
+                status = "failed"
+            record_event(job["id"], "subagent", handle.name + ":" + status)
+            if handle.name in required and status == "completed":
+                seen.add(handle.name)
+        if seen != required or not submitted:
             raise RuntimeError("Deep Agents did not complete required subagents and candidate submission")
         record_event(job["id"], "candidate", "submitted")
-        return get_job(job["id"])
+        return append_result(job["id"], submitted[-1], "deepagents")
     except Exception as exc:
         fail_job(job["id"], str(exc))
         return None

@@ -132,13 +132,22 @@ def test_real_agent_path_audits_all_subagents_and_candidate(monkeypatch):
         def __init__(self, sink, context):
             self.sink, self.context = sink, context
 
-        def stream(self, *_args, **_kwargs):
-            for name in ("evidence_extractor", "rubric_assessor", "feedback_writer"):
-                yield {name: {}}
-            self.sink({"status": "assessed", "level": 3, "confidence": 0.7, "evidence_refs": self.context["job"]["evidence_refs"], "rationale": "fake", "next_step": "next", "rubric_version": self.context["rubric"]["rubric_version"], "model_run_id": "fake-run"})
+        def stream_events(self, *_args, **kwargs):
+            assert kwargs["version"] == "v3"
+
+            class Handle:
+                status = "completed"
+                tool_calls = ()
+
+                def __init__(self, name, output):
+                    self.name, self.output = name, output
+
+            candidate = {"status": "assessed", "level": 3, "confidence": 0.7, "evidence_refs": self.context["job"]["evidence_refs"], "rationale": "fake", "next_step": "next", "rubric_version": self.context["rubric"]["rubric_version"], "model_run_id": "fake-run"}
+            self.sink(candidate)
+            return type("Stream", (), {"subagents": [Handle("evidence_extractor", "evidence"), Handle("rubric_assessor", "assessment"), Handle("feedback_writer", "feedback")]})()
 
     from app.worker import process_one_job
 
     completed = process_one_job(lambda _model, loader, sink: FakeAgent(sink, loader()), lambda: object())
     details = [event["detail"] for event in completed["events"]]
-    assert {"evidence_extractor", "rubric_assessor", "feedback_writer", "submitted"}.issubset(details)
+    assert {"evidence_extractor:completed", "rubric_assessor:completed", "feedback_writer:completed", "submitted"}.issubset(details)
