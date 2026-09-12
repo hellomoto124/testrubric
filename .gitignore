@@ -6,3 +6,4 @@ __pycache__/
 backend/app/data/app.db
 node_modules/
 frontend/node_modules/
+/.e2e/

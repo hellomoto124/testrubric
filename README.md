@@ -33,7 +33,7 @@ uv run python -m backend.app.worker
 
 默认 `DEMO_AGENT_MODE=true`：worker 不调用外部模型，而是按证据长度做确定性演示评估。图像证据默认关闭；设置 `VISION_ENABLED=true` 后才接受图片。
 
-要使用真实 DeepAgents，设置 `DEMO_AGENT_MODE=false`，并按所选 LangChain/OpenAI 兼容模型配置对应环境变量（通常为 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`）。这会调用外部模型，成本、可用性和结果均不属于默认 demo 承诺。
+要使用真实 DeepAgents，设置 `DEMO_AGENT_MODE=false`，并配置 `OPENAI_COMPATIBLE_API_KEY`、`OPENAI_COMPATIBLE_BASE_URL`、`OPENAI_COMPATIBLE_MODEL`。这会调用外部模型，成本、可用性和结果均不属于默认 demo 承诺。
 
 ## API
 

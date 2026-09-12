@@ -1,9 +1,17 @@
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DATABASE_PATH = Path(__file__).parent / "data" / "app.db"
+DEFAULT_DATABASE_PATH = Path(__file__).parent / "data" / "app.db"
+
+
+def database_path() -> Path:
+    return Path(os.getenv("FUTURE9_DATABASE_PATH", DEFAULT_DATABASE_PATH))
+
+
+DATABASE_PATH = database_path()
 DEMO_NOTICE = "模拟测试数据；AI自动评估；非正式。"
 
 
