@@ -2,6 +2,7 @@
 .codegraph/
 __pycache__/
 *.pyc
+*.tsbuildinfo
 backend/app/data/app.db
 node_modules/
 frontend/node_modules/
