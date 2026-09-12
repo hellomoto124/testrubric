@@ -45,8 +45,8 @@ def test_seeded_sqlite_contains_only_simulated_school_classes_and_students():
                 "SELECT count(*) FROM students WHERE is_simulated_test_data = 1"
             ).fetchone()[0] == 20
             assert connection.execute(
-                "SELECT count(*) FROM students GROUP BY class_id HAVING count(*) >= 1"
-            ).fetchall() == [(7,), (7,), (6,)]
+                "SELECT class_id, count(*) FROM students GROUP BY class_id ORDER BY class_id"
+            ).fetchall() == [(1, 7), (2, 7), (3, 6)]
             assert connection.execute("SELECT count(*) FROM rubrics").fetchone()[0] == 1
             assert connection.execute("SELECT count(*) FROM competencies").fetchone()[0] == 9
             assert connection.execute("SELECT count(*) FROM skills").fetchone()[0] == 36
