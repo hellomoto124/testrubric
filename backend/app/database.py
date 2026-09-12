@@ -68,8 +68,6 @@ def initialize(rubric: dict) -> None:
 
 def _seed_demo_assessments(connection, rubric_version: str) -> None:
     """Create the non-official demo baseline once; never replace later work."""
-    if connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]:
-        return
     students = connection.execute("SELECT id FROM students WHERE is_simulated_test_data = 1 ORDER BY id").fetchall()
     competencies = connection.execute("SELECT id, position FROM competencies ORDER BY position").fetchall()
     if len(students) != 20 or len(competencies) != 9:
@@ -77,8 +75,12 @@ def _seed_demo_assessments(connection, rubric_version: str) -> None:
     for (student_id,) in students:
         refs = []
         for evidence_type in ("teacher_observation", "student_self_reflection", "student_work"):
+            row = connection.execute(
+                "SELECT id FROM evidence WHERE student_id = ? AND evidence_type = ? AND text LIKE ? ORDER BY id LIMIT 1",
+                (student_id, evidence_type, f"{DEMO_NOTICE}%"),
+            ).fetchone()
             refs.append(
-                connection.execute(
+                row[0] if row else connection.execute(
                     "INSERT INTO evidence (student_id, evidence_type, text) VALUES (?, ?, ?)",
                     (student_id, evidence_type, f"{DEMO_NOTICE}{evidence_type}证据。"),
                 ).lastrowid
@@ -87,10 +89,23 @@ def _seed_demo_assessments(connection, rubric_version: str) -> None:
             code = connection.execute(
                 "SELECT code FROM skills WHERE competency_id = ? ORDER BY position LIMIT 1", (competency_id,)
             ).fetchone()[0]
-            job_id = connection.execute(
-                "INSERT INTO assessment_jobs (student_id, skill_code, evidence_refs, status, attempts, engine) VALUES (?, ?, ?, 'succeeded', 1, 'seed_demo')",
-                (student_id, code, json.dumps(refs)),
-            ).lastrowid
+            jobs = connection.execute(
+                "SELECT id, status FROM assessment_jobs WHERE student_id = ? AND skill_code = ? AND engine = 'seed_demo' ORDER BY id",
+                (student_id, code),
+            ).fetchall()
+            for duplicate_id, _status in jobs[1:]:
+                connection.execute("DELETE FROM job_events WHERE job_id = ?", (duplicate_id,))
+                connection.execute("DELETE FROM assessment_results WHERE job_id = ?", (duplicate_id,))
+                connection.execute("DELETE FROM assessment_jobs WHERE id = ?", (duplicate_id,))
+            if jobs:
+                job_id, status = jobs[0]
+                if status != "succeeded":
+                    connection.execute("UPDATE assessment_jobs SET status = 'succeeded', attempts = 1 WHERE id = ?", (job_id,))
+            else:
+                job_id = connection.execute(
+                    "INSERT INTO assessment_jobs (student_id, skill_code, evidence_refs, status, attempts, engine) VALUES (?, ?, ?, 'succeeded', 1, 'seed_demo')",
+                    (student_id, code, json.dumps(refs)),
+                ).lastrowid
             result = {
                 "status": "assessed",
                 "level": student_id % 6 + 1,
@@ -101,11 +116,15 @@ def _seed_demo_assessments(connection, rubric_version: str) -> None:
                 "rubric_version": rubric_version,
                 "model_run_id": f"seed-demo-{student_id}-{code}",
             }
-            connection.execute(
-                "INSERT INTO assessment_results (job_id, revision, result) VALUES (?, 1, ?)",
-                (job_id, json.dumps(result, ensure_ascii=False)),
-            )
-            connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, 'succeeded', 'seed_demo')", (job_id,))
+            result_count = connection.execute("SELECT count(*) FROM assessment_results WHERE job_id = ?", (job_id,)).fetchone()[0]
+            if result_count != 1:
+                connection.execute("DELETE FROM assessment_results WHERE job_id = ?", (job_id,))
+                connection.execute(
+                    "INSERT INTO assessment_results (job_id, revision, result) VALUES (?, 1, ?)",
+                    (job_id, json.dumps(result, ensure_ascii=False)),
+                )
+            if not connection.execute("SELECT 1 FROM job_events WHERE job_id = ? AND detail = 'seed_demo'", (job_id,)).fetchone():
+                connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, 'succeeded', 'seed_demo')", (job_id,))
 
 
 def current_rubric() -> dict:
@@ -142,7 +161,7 @@ def _latest_results(connection) -> dict[tuple[int, str], dict]:
         SELECT j.id, j.student_id, j.skill_code, j.engine, r.id, r.revision, r.result, r.created_at
         FROM assessment_jobs j JOIN assessment_results r ON r.job_id = j.id
         WHERE r.revision = (SELECT MAX(revision) FROM assessment_results WHERE job_id = j.id)
-        ORDER BY j.id, r.revision
+        ORDER BY CASE WHEN j.engine = 'seed_demo' THEN 0 ELSE 1 END, j.id, r.revision
         """
     )
     latest = {}
@@ -201,7 +220,9 @@ def school_dashboard() -> dict | None:
         if not school:
             return None
         catalog, results = _catalog(connection), _latest_results(connection)
-        classes = [dict(zip(("id", "name"), row)) for row in connection.execute("SELECT id, name FROM classes WHERE school_id = ? ORDER BY id", (school[0],))]
+        classes = [dict(zip(("id", "name", "is_simulated_test_data"), row)) for row in connection.execute("SELECT id, name, is_simulated_test_data FROM classes WHERE school_id = ? ORDER BY id", (school[0],))]
+        for classroom in classes:
+            classroom["is_simulated_test_data"] = bool(classroom["is_simulated_test_data"])
         students = [row[0] for row in connection.execute("SELECT id FROM students ORDER BY id")]
         class_heatmap = []
         for classroom in classes:
@@ -232,7 +253,9 @@ def class_dashboard(class_id: int) -> dict | None:
         if not classroom:
             return None
         catalog, results = _catalog(connection), _latest_results(connection)
-        students = [dict(zip(("id", "anonymous_id"), row)) for row in connection.execute("SELECT id, anonymous_id FROM students WHERE class_id = ? ORDER BY id", (class_id,))]
+        students = [dict(zip(("id", "anonymous_id", "is_simulated_test_data"), row)) for row in connection.execute("SELECT id, anonymous_id, is_simulated_test_data FROM students WHERE class_id = ? ORDER BY id", (class_id,))]
+        for student in students:
+            student["is_simulated_test_data"] = bool(student["is_simulated_test_data"])
         matrix = [student | {"competencies": _summary(catalog, results, [student["id"]])} for student in students]
     return {
         "data_notice": DEMO_NOTICE,
@@ -269,8 +292,10 @@ def student_profile(student_id: int) -> dict | None:
 def demo_context() -> dict:
     with connect() as connection:
         school = connection.execute("SELECT id, name, is_simulated_test_data FROM schools ORDER BY id LIMIT 1").fetchone()
-        classes = [dict(zip(("id", "school_id", "name"), row)) for row in connection.execute("SELECT id, school_id, name FROM classes ORDER BY id")]
-        students = [dict(zip(("id", "class_id", "anonymous_id"), row)) for row in connection.execute("SELECT id, class_id, anonymous_id FROM students ORDER BY id")]
+        classes = [dict(zip(("id", "school_id", "name", "is_simulated_test_data"), row)) for row in connection.execute("SELECT id, school_id, name, is_simulated_test_data FROM classes ORDER BY id")]
+        students = [dict(zip(("id", "class_id", "anonymous_id", "is_simulated_test_data"), row)) for row in connection.execute("SELECT id, class_id, anonymous_id, is_simulated_test_data FROM students ORDER BY id")]
+        for item in classes + students:
+            item["is_simulated_test_data"] = bool(item["is_simulated_test_data"])
     return {"data_notice": DEMO_NOTICE, "school": {"id": school[0], "name": school[1], "is_simulated_test_data": bool(school[2])}, "classes": classes, "students": students}
 
 
