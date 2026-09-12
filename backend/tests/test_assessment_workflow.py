@@ -1,3 +1,4 @@
+import pytest
 from app.main import app
 from fastapi.testclient import TestClient
 
@@ -77,6 +78,23 @@ def test_deep_agent_receives_exactly_the_three_restricted_subagents():
     assert [agent["name"] for agent in captured["subagents"]] == ["evidence_extractor", "rubric_assessor", "feedback_writer"]
     assert {tool.name for tool in captured["tools"]} == {"read_current_task", "submit_candidate"}
     assert all({tool.name for tool in agent["tools"]} == {"read_current_task", "submit_candidate"} for agent in captured["subagents"])
+
+
+def test_candidate_tool_schema_rejects_qwen_legacy_shape():
+    from app.agents import build_deep_agent
+    from pydantic import ValidationError
+
+    captured = {}
+    build_deep_agent("test-model", dict, lambda candidate: candidate, creator=lambda **kwargs: captured.update(kwargs) or "agent")
+    submit = next(tool for tool in captured["tools"] if tool.name == "submit_candidate")
+    candidate_schema = next(iter(submit.args_schema.model_json_schema()["$defs"].values()))
+
+    assert set(candidate_schema["properties"]) == {"status", "level", "confidence", "evidence_refs", "rationale", "next_step"}
+    assert candidate_schema["additionalProperties"] is False
+    with pytest.raises(ValidationError):
+        submit.invoke({"candidate": {"status": "assessed", "assessed_level": 3, "confidence": 0.8, "evidence_refs": [1], "rationale": "old", "next_step": "next"}})
+    with pytest.raises(ValidationError):
+        submit.invoke({"candidate": {"status": "assessed", "level": 3, "confidence": 0.8, "evidence_refs": [1], "rationale": "valid", "next_step": "next", "rubric_version": "model-must-not-set"}})
 
 
 def test_deep_agent_constructs_with_registered_openai_profile_without_network():
@@ -265,7 +283,7 @@ def test_real_deepagents_graph_completes_with_scripted_model_without_host_tools(
         skill = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
         job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": skill, "evidence_refs": [evidence["id"]]}).json()
 
-    model = ScriptedModel(candidate={"status": "assessed", "level": 3, "confidence": 0.8, "evidence_refs": [evidence["id"]], "rationale": "scripted", "next_step": "next", "rubric_version": "future-9-3", "model_run_id": "scripted-run"})
+    model = ScriptedModel(candidate={"status": "assessed", "level": 3, "confidence": 0.8, "evidence_refs": [evidence["id"]], "rationale": "scripted", "next_step": "next"})
     completed = process_one_job(model_factory=lambda: model)
 
     from app.database import get_job
@@ -273,7 +291,8 @@ def test_real_deepagents_graph_completes_with_scripted_model_without_host_tools(
     assert completed is not None, get_job(job["id"])["error"]
     assert completed["status"] == "succeeded"
     assert completed["engine"] == "deepagents"
-    assert completed["results"][0]["model_run_id"] == "scripted-run"
+    assert completed["results"][0]["rubric_version"] == "future-9-3"
+    assert completed["results"][0]["model_run_id"].startswith("deepagents-")
     assert {"evidence_extractor:completed", "rubric_assessor:completed", "feedback_writer:completed", "submitted"}.issubset({event["detail"] for event in completed["events"]})
     dangerous = {"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"}
     assert model.seen_tools and all(not (set(tools) & dangerous) for tools in model.seen_tools)

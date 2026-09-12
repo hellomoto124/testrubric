@@ -1,6 +1,7 @@
 import os
 import signal
 import time
+import uuid
 
 from .database import (
     append_result,
@@ -35,7 +36,13 @@ def process_one_job(agent_builder=None, model_factory=None):
         from .agents import build_deep_agent, configured_model
 
         required, seen, submitted, task_types = {"evidence_extractor", "rubric_assessor", "feedback_writer"}, set(), [], {}
-        agent = (agent_builder or build_deep_agent)((model_factory or configured_model)(), lambda: context, lambda result: submitted.append(result) or {"accepted": True})
+        run_id = "deepagents-" + str(uuid.uuid4())
+
+        def submit(result):
+            submitted.append(result | {"rubric_version": context["rubric"]["rubric_version"], "model_run_id": run_id})
+            return {"accepted": True}
+
+        agent = (agent_builder or build_deep_agent)((model_factory or configured_model)(), lambda: context, submit)
         for update in agent.stream({"messages": [{"role": "user", "content": "Use evidence_extractor, rubric_assessor, then feedback_writer; submit exactly one candidate."}]}, stream_mode="updates"):
             for event in update.values():
                 if not isinstance(event, dict):
