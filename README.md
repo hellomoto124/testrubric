@@ -42,6 +42,8 @@ rtk uv run python -m backend.app.worker
 
 要使用真实 DeepAgents，设置 `DEMO_AGENT_MODE=false`，并配置 `OPENAI_COMPATIBLE_API_KEY`、`OPENAI_COMPATIBLE_BASE_URL`、`OPENAI_COMPATIBLE_MODEL`。这会调用外部模型，成本、可用性和结果均不属于默认 demo 承诺。
 
+真实 DeepAgents 图由本地脚本模型自动测试：它实际构建图并依次调度三个 subagent、提交候选结果，但不联网。当前环境没有真实外部模型 key，因此真实外部模型调用尚未验证。图内 `read_file` 是 Deep Agents 强制保留的 StateBackend 虚拟工具；HarnessProfile 会在模型请求与工具调用边界屏蔽它，图不会获得宿主文件、写入或执行能力。若启用 `VISION_ENABLED=true`，外部兼容模型还需要支持图片 data URL 的多模态输入。
+
 ## API
 
 - `GET /api/demo/context`、`GET /api/rubrics/current`

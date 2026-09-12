@@ -196,3 +196,58 @@ def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
     worker.run_worker(lambda: next(states), poll_interval=0)
 
     assert calls == ["recover", "job"]
+
+
+def test_real_deepagents_graph_completes_with_scripted_model_without_host_tools(monkeypatch, tmp_path):
+    from app.worker import process_one_job
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+    from pydantic import Field
+
+    class ScriptedModel(BaseChatModel):
+        candidate: dict
+        coordinator_turns: int = 0
+        seen_tools: list[list[str]] = Field(default_factory=list)
+
+        @property
+        def _llm_type(self):
+            return "scripted"
+
+        def _get_ls_params(self, **_kwargs):
+            return {"ls_provider": "openai", "ls_model_name": "scripted", "ls_model_type": "chat"}
+
+        def bind_tools(self, tools, **_kwargs):
+            self.seen_tools.append([tool.name for tool in tools])
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **_kwargs):
+            if "Coordinate the three specialists" not in "\n".join(str(message.content) for message in messages):
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+            if self.coordinator_turns < 3:
+                name = ("evidence_extractor", "rubric_assessor", "feedback_writer")[self.coordinator_turns]
+                self.coordinator_turns += 1
+                message = AIMessage(content="", tool_calls=[{"name": "task", "args": {"subagent_type": name, "description": "complete"}, "id": f"task-{self.coordinator_turns}"}])
+            elif self.coordinator_turns == 3:
+                self.coordinator_turns += 1
+                message = AIMessage(content="", tool_calls=[{"name": "submit_candidate", "args": {"candidate": self.candidate}, "id": "submit"}])
+            else:
+                message = AIMessage(content="done")
+            return ChatResult(generations=[ChatGeneration(message=message)])
+
+    monkeypatch.setenv("FUTURE9_DATABASE_PATH", str(tmp_path / "scripted.db"))
+    monkeypatch.setenv("DEMO_AGENT_MODE", "false")
+    with TestClient(app) as client:
+        evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "学生解释了自己的解题策略。"}).json()
+        skill = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": skill, "evidence_refs": [evidence["id"]]})
+
+    model = ScriptedModel(candidate={"status": "assessed", "level": 3, "confidence": 0.8, "evidence_refs": [evidence["id"]], "rationale": "scripted", "next_step": "next", "rubric_version": "future-9-3", "model_run_id": "scripted-run"})
+    completed = process_one_job(model_factory=lambda: model)
+
+    assert completed["status"] == "succeeded"
+    assert completed["engine"] == "deepagents"
+    assert completed["results"][0]["model_run_id"] == "scripted-run"
+    assert {"evidence_extractor:completed", "rubric_assessor:completed", "feedback_writer:completed", "submitted"}.issubset({event["detail"] for event in completed["events"]})
+    dangerous = {"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"}
+    assert model.seen_tools and all(not (set(tools) & dangerous) for tools in model.seen_tools)
