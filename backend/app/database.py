@@ -39,7 +39,10 @@ def initialize(rubric: dict) -> None:
         )
         connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("模拟测试学校",))
         connection.executemany("INSERT INTO classes VALUES (?, 1, ?, 1)", [(number, f"模拟测试班级{number}") for number in range(1, 4)])
-        connection.executemany("INSERT INTO students VALUES (?, ?, ?, 1)", [(number, (number - 1) // 10 + 1, f"模拟学生{number:02d}") for number in range(1, 31)])
+        connection.executemany(
+            "INSERT INTO students VALUES (?, ?, ?, 1)",
+            [(number, 1 if number <= 7 else 2 if number <= 14 else 3, f"模拟学生{number:02d}") for number in range(1, 21)],
+        )
         rubric_id = connection.execute(
             "INSERT INTO rubrics (rubric_version, source_url, license_note, local_adaptation) VALUES (?, ?, ?, ?)",
             (rubric["rubric_version"], rubric["source_url"], rubric["license_note"], rubric["local_adaptation"]),

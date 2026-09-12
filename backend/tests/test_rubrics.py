@@ -34,7 +34,7 @@ def test_seeded_sqlite_contains_only_simulated_school_classes_and_students():
         with connect() as connection:
             assert connection.execute("SELECT count(*) FROM schools").fetchone()[0] == 1
             assert connection.execute("SELECT count(*) FROM classes").fetchone()[0] == 3
-            assert connection.execute("SELECT count(*) FROM students").fetchone()[0] == 30
+            assert connection.execute("SELECT count(*) FROM students").fetchone()[0] == 20
             assert connection.execute(
                 "SELECT count(*) FROM schools WHERE is_simulated_test_data = 1"
             ).fetchone()[0] == 1
@@ -43,7 +43,10 @@ def test_seeded_sqlite_contains_only_simulated_school_classes_and_students():
             ).fetchone()[0] == 3
             assert connection.execute(
                 "SELECT count(*) FROM students WHERE is_simulated_test_data = 1"
-            ).fetchone()[0] == 30
+            ).fetchone()[0] == 20
+            assert connection.execute(
+                "SELECT count(*) FROM students GROUP BY class_id HAVING count(*) >= 1"
+            ).fetchall() == [(7,), (7,), (6,)]
             assert connection.execute("SELECT count(*) FROM rubrics").fetchone()[0] == 1
             assert connection.execute("SELECT count(*) FROM competencies").fetchone()[0] == 9
             assert connection.execute("SELECT count(*) FROM skills").fetchone()[0] == 36
