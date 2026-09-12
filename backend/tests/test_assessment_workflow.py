@@ -225,6 +225,39 @@ def test_wrong_task_tool_call_id_requeues_real_job(monkeypatch, tmp_path):
     assert "did not complete" in get_job(job["id"])["error"]
 
 
+def test_error_task_tool_message_requeues_even_after_candidate_submission(monkeypatch, tmp_path):
+    from app import database
+    from app.database import get_job
+    from app.worker import process_one_job
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "error-status.db")
+    monkeypatch.setenv("DEMO_AGENT_MODE", "false")
+    with TestClient(app) as client:
+        evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "可用证据。"}).json()
+        skill = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": skill, "evidence_refs": [evidence["id"]]}).json()
+
+    class ErrorAgent:
+        def __init__(self, sink, context):
+            self.sink, self.context = sink, context
+
+        def stream(self, *_args, **_kwargs):
+            for index, name in enumerate(("evidence_extractor", "rubric_assessor", "feedback_writer"), start=1):
+                call_id = f"task-{index}"
+                yield {"model": {"messages": [AIMessage(content="", tool_calls=[{"name": "task", "args": {"subagent_type": name, "description": "complete"}, "id": call_id}])]}}
+                yield {"tools": {"messages": [ToolMessage(content="failed", name="task", tool_call_id=call_id, status="error")]}}
+            self.sink({"status": "assessed", "level": 3, "confidence": 0.8, "evidence_refs": self.context["job"]["evidence_refs"], "rationale": "candidate", "next_step": "next"})
+
+    result = process_one_job(lambda _model, loader, sink: ErrorAgent(sink, loader()), lambda: object())
+    failed_job = get_job(job["id"])
+
+    assert result is None
+    assert failed_job["status"] == "queued"
+    assert not any(event["detail"].endswith(":completed") for event in failed_job["events"])
+    assert {"evidence_extractor:failed", "rubric_assessor:failed", "feedback_writer:failed"}.issubset({event["detail"] for event in failed_job["events"]})
+
+
 def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
     from app import worker
 

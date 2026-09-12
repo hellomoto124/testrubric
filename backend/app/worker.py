@@ -53,8 +53,11 @@ def process_one_job(agent_builder=None, model_factory=None):
                             task_types[call["id"]] = call["args"]["subagent_type"]
                     if getattr(message, "name", None) == "task" and getattr(message, "tool_call_id", None) in task_types:
                         name = task_types[message.tool_call_id]
-                        seen.add(name)
-                        record_event(job["id"], "subagent", name + ":completed")
+                        if getattr(message, "status", "success") == "error":
+                            record_event(job["id"], "subagent", name + ":failed")
+                        else:
+                            seen.add(name)
+                            record_event(job["id"], "subagent", name + ":completed")
         if seen != required or not submitted:
             raise RuntimeError("Deep Agents did not complete required subagents and candidate submission")
         record_event(job["id"], "candidate", "submitted")
