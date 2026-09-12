@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 DATABASE_PATH = Path(__file__).parent / "data" / "app.db"
+DEMO_NOTICE = "模拟测试数据；AI自动评估；非正式。"
 
 
 @contextmanager
@@ -37,32 +38,74 @@ def initialize(rubric: dict) -> None:
             CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, stage TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """
         )
-        if connection.execute("SELECT count(*) FROM schools").fetchone()[0]:
-            return
-        connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("模拟测试学校",))
-        connection.executemany("INSERT INTO classes VALUES (?, 1, ?, 1)", [(number, f"模拟测试班级{number}") for number in range(1, 4)])
-        connection.executemany(
-            "INSERT INTO students VALUES (?, ?, ?, 1)",
-            [(number, 1 if number <= 7 else 2 if number <= 14 else 3, f"模拟学生{number:02d}") for number in range(1, 21)],
-        )
-        rubric_id = connection.execute(
-            "INSERT INTO rubrics (rubric_version, source_url, license_note, local_adaptation) VALUES (?, ?, ?, ?)",
-            (rubric["rubric_version"], rubric["source_url"], rubric["license_note"], rubric["local_adaptation"]),
-        ).lastrowid
-        for competency_position, competency in enumerate(rubric["competencies"]):
-            competency_id = connection.execute(
-                "INSERT INTO competencies (rubric_id, position, name, description) VALUES (?, ?, ?, ?)",
-                (rubric_id, competency_position, competency["name"], competency["description"]),
+        if not connection.execute("SELECT count(*) FROM schools").fetchone()[0]:
+            connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("模拟测试学校",))
+            connection.executemany("INSERT INTO classes VALUES (?, 1, ?, 1)", [(number, f"模拟测试班级{number}") for number in range(1, 4)])
+            connection.executemany(
+                "INSERT INTO students VALUES (?, ?, ?, 1)",
+                [(number, 1 if number <= 7 else 2 if number <= 14 else 3, f"模拟学生{number:02d}") for number in range(1, 21)],
+            )
+            rubric_id = connection.execute(
+                "INSERT INTO rubrics (rubric_version, source_url, license_note, local_adaptation) VALUES (?, ?, ?, ?)",
+                (rubric["rubric_version"], rubric["source_url"], rubric["license_note"], rubric["local_adaptation"]),
             ).lastrowid
-            for skill_position, skill in enumerate(competency["skills"]):
-                skill_id = connection.execute(
-                    "INSERT INTO skills (competency_id, position, code, name) VALUES (?, ?, ?, ?)",
-                    (competency_id, skill_position, skill["code"], skill["name"]),
+            for competency_position, competency in enumerate(rubric["competencies"]):
+                competency_id = connection.execute(
+                    "INSERT INTO competencies (rubric_id, position, name, description) VALUES (?, ?, ?, ?)",
+                    (rubric_id, competency_position, competency["name"], competency["description"]),
                 ).lastrowid
-                connection.executemany(
-                    "INSERT INTO levels (skill_id, level, descriptors) VALUES (?, ?, ?)",
-                    [(skill_id, level["level"], json.dumps(level["descriptors"], ensure_ascii=False)) for level in skill["levels"]],
-                )
+                for skill_position, skill in enumerate(competency["skills"]):
+                    skill_id = connection.execute(
+                        "INSERT INTO skills (competency_id, position, code, name) VALUES (?, ?, ?, ?)",
+                        (competency_id, skill_position, skill["code"], skill["name"]),
+                    ).lastrowid
+                    connection.executemany(
+                        "INSERT INTO levels (skill_id, level, descriptors) VALUES (?, ?, ?)",
+                        [(skill_id, level["level"], json.dumps(level["descriptors"], ensure_ascii=False)) for level in skill["levels"]],
+                    )
+        _seed_demo_assessments(connection, rubric["rubric_version"])
+
+
+def _seed_demo_assessments(connection, rubric_version: str) -> None:
+    """Create the non-official demo baseline once; never replace later work."""
+    if connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]:
+        return
+    students = connection.execute("SELECT id FROM students WHERE is_simulated_test_data = 1 ORDER BY id").fetchall()
+    competencies = connection.execute("SELECT id, position FROM competencies ORDER BY position").fetchall()
+    if len(students) != 20 or len(competencies) != 9:
+        return
+    for (student_id,) in students:
+        refs = []
+        for evidence_type in ("teacher_observation", "student_self_reflection", "student_work"):
+            refs.append(
+                connection.execute(
+                    "INSERT INTO evidence (student_id, evidence_type, text) VALUES (?, ?, ?)",
+                    (student_id, evidence_type, f"{DEMO_NOTICE}{evidence_type}证据。"),
+                ).lastrowid
+            )
+        for competency_id, _position in competencies:
+            code = connection.execute(
+                "SELECT code FROM skills WHERE competency_id = ? ORDER BY position LIMIT 1", (competency_id,)
+            ).fetchone()[0]
+            job_id = connection.execute(
+                "INSERT INTO assessment_jobs (student_id, skill_code, evidence_refs, status, attempts, engine) VALUES (?, ?, ?, 'succeeded', 1, 'seed_demo')",
+                (student_id, code, json.dumps(refs)),
+            ).lastrowid
+            result = {
+                "status": "assessed",
+                "level": student_id % 6 + 1,
+                "confidence": 0.6,
+                "evidence_refs": refs,
+                "rationale": DEMO_NOTICE,
+                "next_step": "模拟测试数据：用于演示，不作正式结论。",
+                "rubric_version": rubric_version,
+                "model_run_id": f"seed-demo-{student_id}-{code}",
+            }
+            connection.execute(
+                "INSERT INTO assessment_results (job_id, revision, result) VALUES (?, 1, ?)",
+                (job_id, json.dumps(result, ensure_ascii=False)),
+            )
+            connection.execute("INSERT INTO job_events (job_id, stage, detail) VALUES (?, 'succeeded', 'seed_demo')", (job_id,))
 
 
 def current_rubric() -> dict:
@@ -76,6 +119,159 @@ def current_rubric() -> dict:
                 skills.append({"code": code, "name": skill_name, "levels": levels})
             competencies.append({"name": name, "description": description, "skills": skills})
     return dict(zip(("rubric_version", "source_url", "license_note", "local_adaptation"), rubric)) | {"competencies": competencies}
+
+
+def _catalog(connection) -> list[dict]:
+    competencies = []
+    for competency_id, position, name, description in connection.execute(
+        "SELECT id, position, name, description FROM competencies ORDER BY position"
+    ):
+        skills = [
+            dict(zip(("id", "code", "name"), row))
+            for row in connection.execute(
+                "SELECT id, code, name FROM skills WHERE competency_id = ? ORDER BY position", (competency_id,)
+            )
+        ]
+        competencies.append({"id": competency_id, "position": position + 1, "name": name, "description": description, "skills": skills})
+    return competencies
+
+
+def _latest_results(connection) -> dict[tuple[int, str], dict]:
+    rows = connection.execute(
+        """
+        SELECT j.id, j.student_id, j.skill_code, j.engine, r.id, r.revision, r.result, r.created_at
+        FROM assessment_jobs j JOIN assessment_results r ON r.job_id = j.id
+        WHERE r.revision = (SELECT MAX(revision) FROM assessment_results WHERE job_id = j.id)
+        ORDER BY j.id, r.revision
+        """
+    )
+    latest = {}
+    for job_id, student_id, skill_code, engine, result_id, revision, result, created_at in rows:
+        latest[(student_id, skill_code)] = json.loads(result) | {
+            "id": result_id,
+            "job_id": job_id,
+            "revision": revision,
+            "engine": engine,
+            "created_at": created_at,
+        }
+    return latest
+
+
+def _summary(catalog: list[dict], results: dict, student_ids: list[int]) -> list[dict]:
+    summaries = []
+    for competency in catalog:
+        assessed = []
+        skill_count = len(student_ids) * len(competency["skills"])
+        for student_id in student_ids:
+            for skill in competency["skills"]:
+                result = results.get((student_id, skill["code"]))
+                if result and result["status"] == "assessed":
+                    assessed.append(result["level"])
+        summaries.append(
+            {
+                "position": competency["position"],
+                "name": competency["name"],
+                "description": competency["description"],
+                "level": sorted(assessed)[(len(assessed) - 1) // 2] if assessed else None,
+                "assessed_count": len(assessed),
+                "skill_count": skill_count,
+                "coverage": len(assessed) / skill_count if skill_count else 0,
+            }
+        )
+    return summaries
+
+
+def _coverage(catalog: list[dict], results: dict, student_ids: list[int]) -> dict:
+    skill_count = len(student_ids) * sum(len(item["skills"]) for item in catalog)
+    assessed_count = sum(
+        result["status"] == "assessed"
+        for (student_id, _), result in results.items()
+        if student_id in student_ids
+    )
+    return {
+        "assessed_count": assessed_count,
+        "skill_count": skill_count,
+        "coverage": assessed_count / skill_count if skill_count else 0,
+    }
+
+
+def school_dashboard() -> dict | None:
+    with connect() as connection:
+        school = connection.execute("SELECT id, name, is_simulated_test_data FROM schools ORDER BY id LIMIT 1").fetchone()
+        if not school:
+            return None
+        catalog, results = _catalog(connection), _latest_results(connection)
+        classes = [dict(zip(("id", "name"), row)) for row in connection.execute("SELECT id, name FROM classes WHERE school_id = ? ORDER BY id", (school[0],))]
+        students = [row[0] for row in connection.execute("SELECT id FROM students ORDER BY id")]
+        class_heatmap = []
+        for classroom in classes:
+            ids = [row[0] for row in connection.execute("SELECT id FROM students WHERE class_id = ? ORDER BY id", (classroom["id"],))]
+            class_heatmap.append({"class": classroom, "competencies": _summary(catalog, results, ids)})
+        levels = [
+            {"level": level, "count": sum(result["level"] == level for result in results.values() if result["status"] == "assessed")}
+            for level in range(1, 7)
+        ]
+        trend = []
+        for date in sorted({result["created_at"][:10] for result in results.values()}):
+            count = sum(result["status"] == "assessed" and result["created_at"].startswith(date) for result in results.values())
+            trend.append({"date": date, "assessed_count": count, "skill_count": len(students) * sum(len(item["skills"]) for item in catalog), "coverage": count / (len(students) * sum(len(item["skills"]) for item in catalog))})
+    return {
+        "data_notice": DEMO_NOTICE,
+        "school": {"id": school[0], "name": school[1], "is_simulated_test_data": bool(school[2])},
+        "competencies": _summary(catalog, results, students),
+        "class_heatmap": class_heatmap,
+        "level_distribution": levels,
+        "coverage": _coverage(catalog, results, students),
+        "trend": trend,
+    }
+
+
+def class_dashboard(class_id: int) -> dict | None:
+    with connect() as connection:
+        classroom = connection.execute("SELECT id, school_id, name, is_simulated_test_data FROM classes WHERE id = ?", (class_id,)).fetchone()
+        if not classroom:
+            return None
+        catalog, results = _catalog(connection), _latest_results(connection)
+        students = [dict(zip(("id", "anonymous_id"), row)) for row in connection.execute("SELECT id, anonymous_id FROM students WHERE class_id = ? ORDER BY id", (class_id,))]
+        matrix = [student | {"competencies": _summary(catalog, results, [student["id"]])} for student in students]
+    return {
+        "data_notice": DEMO_NOTICE,
+        "class": {"id": classroom[0], "school_id": classroom[1], "name": classroom[2], "is_simulated_test_data": bool(classroom[3])},
+        "students": matrix,
+        "competencies": _summary(catalog, results, [student["id"] for student in students]),
+        "coverage": _coverage(catalog, results, [student["id"] for student in students]),
+    }
+
+
+def student_profile(student_id: int) -> dict | None:
+    with connect() as connection:
+        student = connection.execute("SELECT id, class_id, anonymous_id, is_simulated_test_data FROM students WHERE id = ?", (student_id,)).fetchone()
+        if not student:
+            return None
+        catalog, results = _catalog(connection), _latest_results(connection)
+        skills = [
+            {"competency": competency["name"], "code": skill["code"], "name": skill["name"], "result": results.get((student_id, skill["code"]))}
+            for competency in catalog for skill in competency["skills"]
+        ]
+        evidence = [
+            dict(zip(("id", "evidence_type", "text", "filename", "media_type", "created_at"), row))
+            for row in connection.execute("SELECT id, evidence_type, text, filename, media_type, created_at FROM evidence WHERE student_id = ? ORDER BY created_at, id", (student_id,))
+        ]
+    return {
+        "data_notice": DEMO_NOTICE,
+        "student": {"id": student[0], "class_id": student[1], "anonymous_id": student[2], "is_simulated_test_data": bool(student[3])},
+        "competencies": _summary(catalog, results, [student_id]),
+        "skills": skills,
+        "evidence_timeline": evidence,
+    }
+
+
+def demo_context() -> dict:
+    with connect() as connection:
+        school = connection.execute("SELECT id, name, is_simulated_test_data FROM schools ORDER BY id LIMIT 1").fetchone()
+        classes = [dict(zip(("id", "school_id", "name"), row)) for row in connection.execute("SELECT id, school_id, name FROM classes ORDER BY id")]
+        students = [dict(zip(("id", "class_id", "anonymous_id"), row)) for row in connection.execute("SELECT id, class_id, anonymous_id FROM students ORDER BY id")]
+    return {"data_notice": DEMO_NOTICE, "school": {"id": school[0], "name": school[1], "is_simulated_test_data": bool(school[2])}, "classes": classes, "students": students}
 
 
 def create_evidence(student_id: int, evidence_type: str, text: str, filename: str | None = None, media_type: str | None = None, content: bytes | None = None) -> dict:

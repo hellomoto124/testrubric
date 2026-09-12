@@ -8,7 +8,16 @@ from urllib.parse import parse_qs
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .database import append_revision, create_job, get_job, initialize
+from .database import (
+    append_revision,
+    class_dashboard,
+    create_job,
+    demo_context,
+    get_job,
+    initialize,
+    school_dashboard,
+    student_profile,
+)
 from .database import create_evidence as save_evidence
 from .database import current_rubric as load_current_rubric
 
@@ -29,6 +38,35 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/api/rubrics/current")
 def current_rubric() -> dict:
     return load_current_rubric()
+
+
+@app.get("/api/dashboard/school")
+def get_school_dashboard() -> dict:
+    dashboard = school_dashboard()
+    if not dashboard:
+        raise HTTPException(404, "school does not exist")
+    return dashboard
+
+
+@app.get("/api/classes/{class_id}/dashboard")
+def get_class_dashboard(class_id: int) -> dict:
+    dashboard = class_dashboard(class_id)
+    if not dashboard:
+        raise HTTPException(404, "class does not exist")
+    return dashboard
+
+
+@app.get("/api/students/{student_id}/profile")
+def get_student_profile(student_id: int) -> dict:
+    profile = student_profile(student_id)
+    if not profile:
+        raise HTTPException(404, "student does not exist")
+    return profile
+
+
+@app.get("/api/demo/context")
+def get_demo_context() -> dict:
+    return demo_context()
 
 
 @app.post("/api/evidence", status_code=201)
