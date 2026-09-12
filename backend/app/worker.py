@@ -34,19 +34,20 @@ def process_one_job(agent_builder=None, model_factory=None):
             return append_result(job["id"], result, "demo_deterministic")
         from .agents import build_deep_agent, configured_model
 
-        required, seen, submitted = {"evidence_extractor", "rubric_assessor", "feedback_writer"}, set(), []
+        required, seen, submitted, task_types = {"evidence_extractor", "rubric_assessor", "feedback_writer"}, set(), [], {}
         agent = (agent_builder or build_deep_agent)((model_factory or configured_model)(), lambda: context, lambda result: submitted.append(result) or {"accepted": True})
-        stream = agent.stream_events({"messages": [{"role": "user", "content": "Use evidence_extractor, rubric_assessor, then feedback_writer; submit exactly one candidate."}]}, version="v3")
-        for handle in stream.subagents:
-            try:
-                _ = list(handle.tool_calls)
-                _ = handle.output
-                status = handle.status
-            except Exception:  # noqa: BLE001 - external stream projection may fail
-                status = "failed"
-            record_event(job["id"], "subagent", handle.name + ":" + status)
-            if handle.name in required and status == "completed":
-                seen.add(handle.name)
+        for update in agent.stream({"messages": [{"role": "user", "content": "Use evidence_extractor, rubric_assessor, then feedback_writer; submit exactly one candidate."}]}, stream_mode="updates"):
+            for event in update.values():
+                if not isinstance(event, dict):
+                    continue
+                for message in event.get("messages", []):
+                    for call in getattr(message, "tool_calls", []):
+                        if call["name"] == "task" and call.get("id") and call["args"].get("subagent_type") in required:
+                            task_types[call["id"]] = call["args"]["subagent_type"]
+                    if getattr(message, "name", None) == "task" and getattr(message, "tool_call_id", None) in task_types:
+                        name = task_types[message.tool_call_id]
+                        seen.add(name)
+                        record_event(job["id"], "subagent", name + ":completed")
         if seen != required or not submitted:
             raise RuntimeError("Deep Agents did not complete required subagents and candidate submission")
         record_event(job["id"], "candidate", "submitted")

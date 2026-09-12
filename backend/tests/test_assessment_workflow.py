@@ -164,25 +164,47 @@ def test_real_agent_path_audits_all_subagents_and_candidate(monkeypatch):
         def __init__(self, sink, context):
             self.sink, self.context = sink, context
 
-        def stream_events(self, *_args, **kwargs):
-            assert kwargs["version"] == "v3"
+        def stream(self, *_args, **kwargs):
+            from langchain_core.messages import AIMessage, ToolMessage
 
-            class Handle:
-                status = "completed"
-                tool_calls = ()
-
-                def __init__(self, name, output):
-                    self.name, self.output = name, output
-
+            assert kwargs["stream_mode"] == "updates"
             candidate = {"status": "assessed", "level": 3, "confidence": 0.7, "evidence_refs": self.context["job"]["evidence_refs"], "rationale": "fake", "next_step": "next", "rubric_version": self.context["rubric"]["rubric_version"], "model_run_id": "fake-run"}
+            for index, name in enumerate(("evidence_extractor", "rubric_assessor", "feedback_writer"), start=1):
+                call_id = f"task-{index}"
+                yield {"model": {"messages": [AIMessage(content="", tool_calls=[{"name": "task", "args": {"subagent_type": name, "description": "complete"}, "id": call_id}])]}}
+                yield {"tools": {"messages": [ToolMessage(content="done", name="task", tool_call_id=call_id)]}}
             self.sink(candidate)
-            return type("Stream", (), {"subagents": [Handle("evidence_extractor", "evidence"), Handle("rubric_assessor", "assessment"), Handle("feedback_writer", "feedback")]})()
 
     from app.worker import process_one_job
 
     completed = process_one_job(lambda _model, loader, sink: FakeAgent(sink, loader()), lambda: object())
     details = [event["detail"] for event in completed["events"]]
     assert {"evidence_extractor:completed", "rubric_assessor:completed", "feedback_writer:completed", "submitted"}.issubset(details)
+
+
+def test_wrong_task_tool_call_id_requeues_real_job(monkeypatch, tmp_path):
+    from app import database
+    from app.database import get_job
+    from app.worker import process_one_job
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "wrong-id.db")
+    monkeypatch.setenv("DEMO_AGENT_MODE", "false")
+    with TestClient(app) as client:
+        evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "可用证据。"}).json()
+        skill = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
+        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": skill, "evidence_refs": [evidence["id"]]}).json()
+
+    class WrongIdAgent:
+        def stream(self, *_args, **_kwargs):
+            yield {"model": {"messages": [AIMessage(content="", tool_calls=[{"name": "task", "args": {"subagent_type": "evidence_extractor", "description": "complete"}, "id": "known"}])]}}
+            yield {"tools": {"messages": [ToolMessage(content="done", name="task", tool_call_id="wrong")]}}
+
+    result = process_one_job(lambda _model, _loader, _sink: WrongIdAgent(), lambda: object())
+
+    assert result is None
+    assert get_job(job["id"])["status"] == "queued"
+    assert "did not complete" in get_job(job["id"])["error"]
 
 
 def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
@@ -199,6 +221,7 @@ def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
 
 
 def test_real_deepagents_graph_completes_with_scripted_model_without_host_tools(monkeypatch, tmp_path):
+    from app import database
     from app.worker import process_one_job
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.messages import AIMessage
@@ -235,16 +258,19 @@ def test_real_deepagents_graph_completes_with_scripted_model_without_host_tools(
                 message = AIMessage(content="done")
             return ChatResult(generations=[ChatGeneration(message=message)])
 
-    monkeypatch.setenv("FUTURE9_DATABASE_PATH", str(tmp_path / "scripted.db"))
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path / "scripted.db")
     monkeypatch.setenv("DEMO_AGENT_MODE", "false")
     with TestClient(app) as client:
         evidence = client.post("/api/evidence", json={"student_id": 1, "evidence_type": "teacher_observation", "text": "学生解释了自己的解题策略。"}).json()
         skill = client.get("/api/rubrics/current").json()["competencies"][0]["skills"][0]["code"]
-        client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": skill, "evidence_refs": [evidence["id"]]})
+        job = client.post("/api/assessment-jobs", json={"student_id": 1, "skill_code": skill, "evidence_refs": [evidence["id"]]}).json()
 
     model = ScriptedModel(candidate={"status": "assessed", "level": 3, "confidence": 0.8, "evidence_refs": [evidence["id"]], "rationale": "scripted", "next_step": "next", "rubric_version": "future-9-3", "model_run_id": "scripted-run"})
     completed = process_one_job(model_factory=lambda: model)
 
+    from app.database import get_job
+
+    assert completed is not None, get_job(job["id"])["error"]
     assert completed["status"] == "succeeded"
     assert completed["engine"] == "deepagents"
     assert completed["results"][0]["model_run_id"] == "scripted-run"
