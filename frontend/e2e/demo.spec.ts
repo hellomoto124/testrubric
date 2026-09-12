@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 
 const evidence = "模拟测试数据：学生能清楚说明解题依据，并愿意倾听同伴的不同想法。";
+const fileEvidence = "模拟测试数据：仅文件上传的 TXT 证据。";
 const database = resolve(dirname(fileURLToPath(import.meta.url)), "../../.e2e/future9-e2e.db");
 
 test("isolated demo job refreshes evidence, skill, events, and school coverage", async ({ page }) => {
@@ -15,8 +16,13 @@ test("isolated demo job refreshes evidence, skill, events, and school coverage",
   const targetSkill = page.locator(".skills article").filter({ hasText: "BC.2" });
   await expect(targetSkill).toContainText("待收集证据");
   await roles.getByRole("button", { name: "教师", exact: true }).click();
+  await expect(page.getByPlaceholder("输入模拟测试证据")).toHaveValue("");
+  await page.locator('input[type="file"]').setInputFiles({ name: "work.txt", mimeType: "text/plain", buffer: Buffer.from(fileEvidence) });
+  await page.getByRole("button", { name: "保存证据" }).click();
+  await expect(page.getByText("已保存证据：1")).toBeVisible();
   await page.getByPlaceholder("输入模拟测试证据").fill(evidence);
   await page.getByRole("button", { name: "保存证据" }).click();
+  await expect(page.getByText("已保存证据：2")).toBeVisible();
   await page.getByRole("combobox", { name: "技能" }).selectOption("BC.2");
   await page.getByRole("button", { name: "创建 Job" }).click();
   const queued = page.getByText(/任务 #\d+：queued|任务 #\d+：running/);
@@ -27,7 +33,20 @@ test("isolated demo job refreshes evidence, skill, events, and school coverage",
   await expect(page.getByText(/succeeded: demo_deterministic/)).toBeVisible();
   await roles.getByRole("button", { name: "学生", exact: true }).click();
   await expect(page.getByText(evidence)).toBeVisible();
+  await expect(page.getByText(fileEvidence)).toBeVisible();
   await expect(targetSkill).toContainText("等级 3");
   await roles.getByRole("button", { name: "管理员", exact: true }).click();
   await expect(page.locator(".metric")).toHaveText(/181\/720/);
+});
+
+test("desktop and tablet do not horizontally overflow", async ({ page }) => {
+  for (const width of [1440, 768]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    await expect(page.locator(".metric")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.getByRole("navigation", { name: "角色切换" }).getByRole("button", { name: "教师", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "教师工作台" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
 });

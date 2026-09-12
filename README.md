@@ -6,27 +6,34 @@
 
 需要 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 Node.js（含 pnpm）。
 
+本工作区的全局规则要求终端命令以 `rtk` 开头；`rtk` 也是 E2E 启动后端和子进程 worker 的必需前置。本仓库不管理其安装，请使用团队提供的全局 `rtk`，先检查：
+
 ```sh
-uv sync
-cd frontend && pnpm install
+rtk --version
+rtk gain
+```
+
+```sh
+rtk uv sync
+cd frontend && rtk pnpm install
 ```
 
 后端首次启动会自动在 `backend/app/data/app.db` 写入可重复的模拟学校、班级、学生、量规和已完成的演示结果：
 
 ```sh
-uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+rtk uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
 另一个终端启动前端（`/api` 会代理到 8000）：
 
 ```sh
-cd frontend && pnpm dev
+cd frontend && rtk pnpm dev
 ```
 
 需要单独消费排队任务时运行：
 
 ```sh
-uv run python -m backend.app.worker
+rtk uv run python -m backend.app.worker
 ```
 
 ## 模式与环境变量
@@ -46,12 +53,12 @@ uv run python -m backend.app.worker
 ## 验证
 
 ```sh
-uv run pytest -q
+rtk uv run pytest -q
 cd frontend
-pnpm test
-pnpm typecheck
-pnpm build
-pnpm test:e2e
+rtk pnpm test
+rtk pnpm typecheck
+rtk pnpm build
+rtk pnpm test:e2e
 ```
 
-E2E 通过浏览器提交“模拟测试数据”证据、创建任务，在一个子进程中运行 worker，再检查 SSE/轮询完成及学生、学校视图刷新。首次运行如缺 Chromium，执行 `pnpm exec playwright install chromium`。
+E2E 通过浏览器提交“模拟测试数据”证据、创建任务，在一个子进程中运行 worker，再检查 SSE/轮询完成及学生、学校视图刷新。首次运行如缺 Chromium，执行 `rtk pnpm exec playwright install chromium`。

@@ -1,1 +1,35 @@
-:root { font-family: Inter, system-ui, sans-serif; color: #18212f; background: #f5f7fb; } * { box-sizing: border-box; } body { margin: 0; overflow-x: hidden; } button, select, textarea, input { font: inherit; } button { cursor: pointer; border: 1px solid #b9c5d8; border-radius: 7px; padding: .5rem .7rem; background: white; } button.active { background: #174ea6; color: white; } .notice { position: sticky; top: 0; z-index: 2; display: flex; gap: 1rem; align-items: center; padding: .7rem max(1rem, calc((100vw - 1180px) / 2)); color: #513900; background: #fff4ce; border-bottom: 1px solid #e3c35f; } nav, main { max-width: 1180px; margin: auto; padding: 1rem; } nav { display: flex; gap: .5rem; } h1 { margin-top: 0; } h2 { font-size: 1rem; } .dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; } article, form { background: white; border: 1px solid #dce3ef; border-radius: 10px; padding: 1rem; } .chart { width: 100%; height: 290px; } .metric { font-size: 1.5rem; margin: .5rem 0; } .matrix, .skills { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; margin: 1rem 0; } .matrix button, .skills article { min-width: 0; text-align: left; display: grid; gap: .3rem; } form { display: grid; gap: .7rem; max-width: 680px; } label { display: grid; gap: .3rem; margin: .5rem 0; } textarea { min-height: 100px; } @media (max-width: 767px) { .notice { align-items: flex-start; flex-direction: column; gap: .2rem; } .dashboard-grid { grid-template-columns: 1fr; } }
+:root { font-family: Inter, system-ui, sans-serif; color: #18212f; background: #f5f7fb; }
+* { box-sizing: border-box; }
+body { margin: 0; overflow-x: hidden; }
+button, select, textarea, input { font: inherit; }
+button { cursor: pointer; border: 1px solid #b9c5d8; border-radius: 7px; padding: .5rem .7rem; background: white; }
+button.active { background: #174ea6; color: white; }
+select, textarea, input:not([type="file"]) { min-height: 2.5rem; padding: .5rem .65rem; border: 1px solid #aebdd1; border-radius: 7px; background: white; }
+input[type="file"] { min-height: 2.5rem; padding: .35rem 0; }
+textarea { min-height: 100px; resize: vertical; }
+.notice { position: sticky; top: 0; z-index: 2; display: flex; gap: 1rem; align-items: center; padding: .7rem max(1rem, calc((100vw - 1180px) / 2)); color: #513900; background: #fff4ce; border-bottom: 1px solid #e3c35f; }
+nav, main { max-width: 1180px; margin: auto; padding: 1rem; }
+nav { display: flex; gap: .5rem; }
+h1 { margin-top: 0; }
+h2 { font-size: 1rem; }
+.dashboard-grid, .student-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+article, form { background: white; border: 1px solid #dce3ef; border-radius: 10px; padding: 1rem; }
+.chart { width: 100%; height: 290px; }
+.metric { font-size: 1.5rem; margin: .5rem 0; }
+.matrix { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .6rem; margin: 1rem 0; }
+.skills { display: grid; grid-template-columns: repeat(4, minmax(250px, 1fr)); gap: .6rem; margin: 1rem 0; }
+.matrix button, .skills article { min-width: 0; text-align: left; display: grid; gap: .3rem; }
+.matrix small, article small { color: #5f6f85; }
+.skill-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+form { display: grid; gap: .7rem; max-width: 680px; }
+label { display: grid; gap: .3rem; margin: .5rem 0; }
+.timeline { max-height: 360px; overflow: auto; padding-right: .5rem; }
+.timeline li { margin: .45rem 0; }
+@media (max-width: 900px) {
+  .matrix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .skills { grid-template-columns: repeat(2, minmax(250px, 1fr)); }
+}
+@media (max-width: 767px) {
+  .notice { align-items: flex-start; flex-direction: column; gap: .2rem; }
+  .dashboard-grid, .student-overview, .matrix, .skills { grid-template-columns: 1fr; }
+}
