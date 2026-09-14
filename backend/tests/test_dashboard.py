@@ -8,14 +8,37 @@ def test_startup_seeds_reproducible_non_official_demo_assessments():
         from app.database import connect, initialize
 
         with connect() as connection:
-            assert connection.execute("SELECT count(*) FROM evidence").fetchone()[0] == 60
-            assert connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0] == 180
-            assert connection.execute("SELECT count(*) FROM assessment_results").fetchone()[0] == 180
-            assert connection.execute("SELECT count(*) FROM assessment_jobs WHERE engine = 'seed_demo' AND status = 'succeeded'").fetchone()[0] == 180
-            assert connection.execute("SELECT count(*) FROM evidence WHERE text LIKE '%模拟测试数据%AI自动评估%非正式%'").fetchone()[0] == 60
+            assert (
+                connection.execute("SELECT count(*) FROM evidence").fetchone()[0] == 60
+            )
+            assert (
+                connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]
+                == 180
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM assessment_results"
+                ).fetchone()[0]
+                == 180
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM assessment_jobs WHERE engine = 'seed_demo' AND status = 'succeeded'"
+                ).fetchone()[0]
+                == 180
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM evidence WHERE text LIKE '%模拟测试数据%AI自动评估%非正式%'"
+                ).fetchone()[0]
+                == 60
+            )
         initialize(RUBRIC)
         with connect() as connection:
-            assert connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0] == 180
+            assert (
+                connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]
+                == 180
+            )
 
 
 def test_school_dashboard_has_nine_summaries_heatmap_distribution_coverage_and_trend():
@@ -28,8 +51,19 @@ def test_school_dashboard_has_nine_summaries_heatmap_distribution_coverage_and_t
     assert payload["school"]["is_simulated_test_data"] is True
     assert len(payload["competencies"]) == 9
     assert [item["level"] for item in payload["competencies"]] == [3] * 9
-    assert payload["coverage"] == {"assessed_count": 180, "skill_count": 720, "coverage": 0.25}
-    assert [item["count"] for item in payload["level_distribution"]] == [27, 36, 36, 27, 27, 27]
+    assert payload["coverage"] == {
+        "assessed_count": 180,
+        "skill_count": 720,
+        "coverage": 0.25,
+    }
+    assert [item["count"] for item in payload["level_distribution"]] == [
+        27,
+        36,
+        36,
+        27,
+        27,
+        27,
+    ]
     assert [item["class"]["id"] for item in payload["class_heatmap"]] == [1, 2, 3]
     assert payload["trend"]
 
@@ -63,7 +97,10 @@ def test_drill_down_records_are_explicitly_simulated():
         context = client.get("/api/demo/context").json()
         profile = client.get("/api/students/1/profile").json()
 
-    assert all(item["class"]["is_simulated_test_data"] is True for item in school["class_heatmap"])
+    assert all(
+        item["class"]["is_simulated_test_data"] is True
+        for item in school["class_heatmap"]
+    )
     assert all(item["is_simulated_test_data"] is True for item in classroom["students"])
     assert all(item["is_simulated_test_data"] is True for item in context["classes"])
     assert all(item["is_simulated_test_data"] is True for item in context["students"])
@@ -71,7 +108,15 @@ def test_drill_down_records_are_explicitly_simulated():
 
 
 def test_existing_non_seed_result_keeps_priority_while_initialize_backfills_demo_baseline():
-    from app.database import DEMO_NOTICE, append_result, connect, create_evidence, create_job, initialize, student_profile
+    from app.database import (
+        DEMO_NOTICE,
+        append_result,
+        connect,
+        create_evidence,
+        create_job,
+        initialize,
+        student_profile,
+    )
 
     with TestClient(app):
         with connect() as connection:
@@ -98,18 +143,43 @@ def test_existing_non_seed_result_keeps_priority_while_initialize_backfills_demo
         )
         initialize(RUBRIC)
         with connect() as connection:
-            assert connection.execute("SELECT count(*) FROM assessment_jobs WHERE engine = 'seed_demo'").fetchone()[0] == 180
-            assert connection.execute("SELECT count(*) FROM assessment_results").fetchone()[0] == 181
-            assert connection.execute("SELECT count(*) FROM evidence WHERE text LIKE ?", (f"{DEMO_NOTICE}%",)).fetchone()[0] == 60
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM assessment_jobs WHERE engine = 'seed_demo'"
+                ).fetchone()[0]
+                == 180
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM assessment_results"
+                ).fetchone()[0]
+                == 181
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM evidence WHERE text LIKE ?",
+                    (f"{DEMO_NOTICE}%",),
+                ).fetchone()[0]
+                == 60
+            )
             assert connection.execute(
                 "SELECT student_id, count(*), count(DISTINCT evidence_type) FROM evidence WHERE text LIKE ? GROUP BY student_id ORDER BY student_id",
                 (f"{DEMO_NOTICE}%",),
             ).fetchall() == [(student_id, 3, 3) for student_id in range(1, 21)]
-            before = connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]
+            before = connection.execute(
+                "SELECT count(*) FROM assessment_jobs"
+            ).fetchone()[0]
         initialize(RUBRIC)
         with connect() as connection:
-            assert connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0] == before
+            assert (
+                connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]
+                == before
+            )
 
-    result = next(item["result"] for item in student_profile(1)["skills"] if item["code"] == skill_code)
+    result = next(
+        item["result"]
+        for item in student_profile(1)["skills"]
+        if item["code"] == skill_code
+    )
     assert result["engine"] == "teacher_review"
     assert result["level"] == 6

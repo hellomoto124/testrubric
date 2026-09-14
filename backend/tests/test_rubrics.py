@@ -14,9 +14,14 @@ def test_current_rubric_contains_all_future9_skills_and_levels():
     assert rubric["license_note"]
     assert "local_adaptation" in rubric
     assert len(rubric["competencies"]) == 9
-    skills = [skill for competency in rubric["competencies"] for skill in competency["skills"]]
+    skills = [
+        skill for competency in rubric["competencies"] for skill in competency["skills"]
+    ]
     assert len(skills) == 36
-    assert all([level["level"] for level in skill["levels"]] == [1, 2, 3, 4, 5, 6] for skill in skills)
+    assert all(
+        [level["level"] for level in skill["levels"]] == [1, 2, 3, 4, 5, 6]
+        for skill in skills
+    )
     assert all(
         descriptor not in {"--", "---"}
         for skill in skills
@@ -33,23 +38,39 @@ def test_seeded_sqlite_contains_only_simulated_school_classes_and_students():
         with connect() as connection:
             assert connection.execute("SELECT count(*) FROM schools").fetchone()[0] == 1
             assert connection.execute("SELECT count(*) FROM classes").fetchone()[0] == 3
-            assert connection.execute("SELECT count(*) FROM students").fetchone()[0] == 20
-            assert connection.execute(
-                "SELECT count(*) FROM schools WHERE is_simulated_test_data = 1"
-            ).fetchone()[0] == 1
-            assert connection.execute(
-                "SELECT count(*) FROM classes WHERE is_simulated_test_data = 1"
-            ).fetchone()[0] == 3
-            assert connection.execute(
-                "SELECT count(*) FROM students WHERE is_simulated_test_data = 1"
-            ).fetchone()[0] == 20
+            assert (
+                connection.execute("SELECT count(*) FROM students").fetchone()[0] == 20
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM schools WHERE is_simulated_test_data = 1"
+                ).fetchone()[0]
+                == 1
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM classes WHERE is_simulated_test_data = 1"
+                ).fetchone()[0]
+                == 3
+            )
+            assert (
+                connection.execute(
+                    "SELECT count(*) FROM students WHERE is_simulated_test_data = 1"
+                ).fetchone()[0]
+                == 20
+            )
             assert connection.execute(
                 "SELECT class_id, count(*) FROM students GROUP BY class_id ORDER BY class_id"
             ).fetchall() == [(1, 7), (2, 7), (3, 6)]
             assert connection.execute("SELECT count(*) FROM rubrics").fetchone()[0] == 1
-            assert connection.execute("SELECT count(*) FROM competencies").fetchone()[0] == 9
+            assert (
+                connection.execute("SELECT count(*) FROM competencies").fetchone()[0]
+                == 9
+            )
             assert connection.execute("SELECT count(*) FROM skills").fetchone()[0] == 36
-            assert connection.execute("SELECT count(*) FROM levels").fetchone()[0] == 216
+            assert (
+                connection.execute("SELECT count(*) FROM levels").fetchone()[0] == 216
+            )
             row = connection.execute(
                 "SELECT rubric_version, source_url, license_note, local_adaptation FROM rubrics"
             ).fetchone()

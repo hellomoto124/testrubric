@@ -45,16 +45,35 @@ def build_deep_agent(model, task_loader, candidate_sink, creator=None):
     register_harness_profile(
         "openai",
         HarnessProfile(
-            excluded_tools=frozenset({"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"}),
+            excluded_tools=frozenset(
+                {
+                    "delete",
+                    "edit_file",
+                    "execute",
+                    "glob",
+                    "grep",
+                    "ls",
+                    "read_file",
+                    "write_file",
+                }
+            ),
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
     subagents = [
-        {"name": name, "description": description, "system_prompt": "Use only the supplied tools. Submit candidates only through the submit_candidate schema; never invent rubric_version or model_run_id.", "tools": tools}
+        {
+            "name": name,
+            "description": description,
+            "system_prompt": "Use only the supplied tools. Submit candidates only through the submit_candidate schema; never invent rubric_version or model_run_id.",
+            "tools": tools,
+        }
         for name, description in (
             ("evidence_extractor", "Extract relevant evidence from the current task."),
             ("rubric_assessor", "Assess evidence against the supplied rubric."),
-            ("feedback_writer", "Write concise, actionable feedback from the assessment."),
+            (
+                "feedback_writer",
+                "Write concise, actionable feedback from the assessment.",
+            ),
         )
     ]
     return creator(

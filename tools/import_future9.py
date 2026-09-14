@@ -35,10 +35,16 @@ def parse() -> dict:
         if match := re.fullmatch(r"\*\*素养描述\*\*:(.+)", line):
             current_competency["description"] = match.group(1).strip()
         elif match := re.fullmatch(r"###\s+([A-Z]+\.\d+)\s+(.+)", line):
-            current_skill = {"code": match.group(1), "name": match.group(2), "levels": []}
+            current_skill = {
+                "code": match.group(1),
+                "name": match.group(2),
+                "levels": [],
+            }
             current_competency["skills"].append(current_skill)
             current_level = None
-        elif current_skill and (match := re.fullmatch(r"\*\*Level\s+([1-6])\*\*.*", line)):
+        elif current_skill and (
+            match := re.fullmatch(r"\*\*Level\s+([1-6])\*\*.*", line)
+        ):
             current_level = {"level": int(match.group(1)), "descriptors": []}
             current_skill["levels"].append(current_level)
         elif current_level and line.startswith("- "):
@@ -47,7 +53,10 @@ def parse() -> dict:
     skills = [skill for competency in competencies for skill in competency["skills"]]
     assert len(competencies) == 9, len(competencies)
     assert len(skills) == 36, len(skills)
-    assert all([level["level"] for level in skill["levels"]] == [1, 2, 3, 4, 5, 6] for skill in skills)
+    assert all(
+        [level["level"] for level in skill["levels"]] == [1, 2, 3, 4, 5, 6]
+        for skill in skills
+    )
     return {
         "rubric_version": "future-9-3",
         "source_url": SOURCE_URL,
@@ -59,4 +68,6 @@ def parse() -> dict:
 
 if __name__ == "__main__":
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(parse(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    OUTPUT.write_text(
+        json.dumps(parse(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )

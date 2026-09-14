@@ -1,5 +1,10 @@
 {
   "rubric_version": "kai_feng_yuyang_260910",
+  "source": {
+    "workbook_name": "雨旸素养框架.xlsx",
+    "sheet_name": "素养量规表-260910",
+    "sha256": "ac1f3e062c25c09ce79f659509163955ea4012e31bc4708046ff8cdcebc48ef8"
+  },
   "school_rule": {
     "grades": "3-6",
     "bands": {
