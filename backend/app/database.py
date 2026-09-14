@@ -325,7 +325,12 @@ def _seed_v2_demo_results(connection, rubric_id):
         "SELECT code FROM skills_v2 WHERE rubric_id = ? ORDER BY code LIMIT 12",
         (rubric_id,),
     ).fetchall()
-    students = [row[0] for row in connection.execute("SELECT id FROM students ORDER BY id")]
+    students = [
+        row[0]
+        for row in connection.execute(
+            "SELECT id FROM students WHERE is_simulated_test_data = 1 ORDER BY id"
+        )
+    ]
     for skill_index, (skill_code,) in enumerate(skills):
         config_id = connection.execute(
             """SELECT id FROM scoring_configs_v2 WHERE rubric_id = ? AND skill_code = ?
@@ -362,10 +367,14 @@ def _seed_v2_demo_results(connection, rubric_id):
             ).fetchone()
             if existing:
                 continue
-            evidence_ref = connection.execute(
-                "SELECT id FROM evidence WHERE student_id = ? ORDER BY id LIMIT 1",
-                (student_id,),
-            ).fetchone()[0]
+            evidence = connection.execute(
+                """SELECT id FROM evidence WHERE student_id = ? AND text LIKE ?
+                ORDER BY id LIMIT 1""",
+                (student_id, f"{DEMO_NOTICE}%"),
+            ).fetchone()
+            if not evidence:
+                continue
+            evidence_ref = evidence[0]
             pattern = (student_id + skill_index) % 7
             judgments = []
             for group in config["groups"]:

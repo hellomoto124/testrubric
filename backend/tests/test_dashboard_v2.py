@@ -99,3 +99,27 @@ def test_v2_seed_is_idempotent_and_live_result_wins_without_deleting_seed():
         assert connection.execute(
             "SELECT count(*) FROM assessment_results_v2 WHERE engine = 'seed_demo_v2'"
         ).fetchone()[0] == 228
+
+
+def test_v2_seed_never_touches_non_simulated_students_with_or_without_evidence():
+    from app.database import connect, initialize
+    from app.main import RUBRIC
+
+    with TestClient(app):
+        pass
+    with connect() as connection:
+        connection.executemany(
+            "INSERT INTO students (id, class_id, anonymous_id, is_simulated_test_data) VALUES (?, 1, ?, 0)",
+            [(21, "真实占位学生21"), (22, "真实占位学生22")],
+        )
+        connection.execute(
+            "INSERT INTO evidence (student_id, evidence_type, text) VALUES (21, 'teacher_observation', '非演示证据')"
+        )
+    initialize(RUBRIC)
+    with connect() as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM assessment_jobs_v2 WHERE student_id IN (21, 22)"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT count(*) FROM assessment_results_v2 WHERE engine = 'seed_demo_v2'"
+        ).fetchone()[0] == 228
