@@ -1,66 +1,87 @@
-# Future9 模拟评估 Demo
+# 凯风雨旸小学素养评估 Demo
 
-这是一个本地演示：20 名匿名模拟学生、9 项素养和 36 项技能。所有页面固定标明“模拟测试数据 / AI 自动评估 / 非正式成绩”；角色切换仅切换视图，不是认证，也不产生排名。
+本地 V0.2 Demo：1 所模拟学校、3 个班、20 名匿名模拟学生，使用学校版 3 个育人目标、10 项素养能力、38 项技能和 228 个 Level 单元。所有页面固定标明“模拟测试数据 / AI 自动评估 / 非正式成绩”；角色切换不是认证，不产生总分或排名。
 
-## 安装与启动
+连续评分由后端 `anchor_interp_v1` 确定性计算：完整 Level、相邻 Level 进度、0–600 水平分、未知区间和目标差距。AI 只提交指标 0–4 档、未知、无关或冲突，不提交权重和最终分数。三年级默认目标 Level 3、Level 2 基础、Level 4 优秀是凯风雨旸小学本土演示规则，不是 Future9 官方年级规则。
 
-需要 Python 3.12、[uv](https://docs.astral.sh/uv/) 和 Node.js（含 pnpm）。
+## 环境与安装
 
-本工作区的全局规则要求终端命令以 `rtk` 开头；`rtk` 也是 E2E 启动后端和子进程 worker 的必需前置。本仓库不管理其安装，请使用团队提供的全局 `rtk`，先检查：
-
-```sh
-rtk --version
-rtk gain
-```
+需要 Python 3.12、uv、Node.js、pnpm 和团队提供的 `rtk`。
 
 ```sh
 rtk uv sync
-cd frontend && rtk pnpm install
+rtk pnpm --dir frontend install
 ```
 
-后端首次启动会自动在 `backend/app/data/app.db` 写入可重复的模拟学校、班级、学生、量规和已完成的演示结果：
+后端首次启动会初始化 SQLite。演示种子可重复运行，不触碰非模拟学生或真实/人工结果。
 
 ```sh
 rtk uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-```
-
-另一个终端启动前端（`/api` 会代理到 8000）：
-
-```sh
-cd frontend && rtk pnpm dev
-```
-
-需要单独消费排队任务时运行：
-
-```sh
 rtk uv run --env-file .env python -m backend.app.worker
+rtk pnpm --dir frontend dev --host 127.0.0.1 --port 5173
 ```
 
-## 模式与环境变量
+## 学校量规导入
 
-默认 `DEMO_AGENT_MODE=true`：worker 不调用外部模型，而是按证据长度做确定性演示评估。图像证据默认关闭；设置 `VISION_ENABLED=true` 后才接受图片。
+仓库运行时读取标准化文件 `backend/app/data/kai_feng_yuyang_260910.json`，不依赖 Downloads 路径。重新生成时使用未提交的原始 Excel：
 
-要使用真实 DeepAgents，设置 `DEMO_AGENT_MODE=false`，并配置 `OPENAI_COMPATIBLE_API_KEY`、`OPENAI_COMPATIBLE_BASE_URL`、`OPENAI_COMPATIBLE_MODEL`。这会调用外部模型，成本、可用性和结果均不属于默认 demo 承诺。
+```sh
+rtk uv run python tools/import_yuyang_rubric.py \
+  /Users/xiexiaodong/Downloads/雨旸素养框架.xlsx \
+  --sheet 素养量规表-260910 \
+  --output backend/app/data/kai_feng_yuyang_260910.json
+```
 
-真实 DeepAgents 图由本地脚本模型通过稳定的 `agent.stream(..., stream_mode="updates")` 自动测试：它实际构建图并用 task 调用和对应 ToolMessage 的 tool_call_id 映射确认三个 subagent 完成、再提交候选结果，但不联网。本机项目根目录的 `.env` 已被 Git 忽略；不要提交或复制真实密钥，启动 worker 时使用 `uv run --env-file .env ...`。图内 `read_file` 是 Deep Agents 强制保留的 StateBackend 虚拟工具；HarnessProfile 会在模型请求与工具调用边界屏蔽它，图不会获得宿主文件、写入或执行能力。若启用 `VISION_ENABLED=true`，外部兼容模型还需要支持图片 data URL 的多模态输入。
+导入器保留中英文名、子技能、出处、Excel 行号、六级描述及项目符号指标。Legacy 9/36 量规和结果仍可通过原 `/api` 路由读取，旧结果标记 `legacy_unscored`，不会自动补成 `Level × 100`。
 
-## API
+## 千问 / OpenAI-compatible 配置
 
-- `GET /api/demo/context`、`GET /api/rubrics/current`
-- `GET /api/dashboard/school`、`GET /api/classes/{id}/dashboard`、`GET /api/students/{id}/profile`
-- `POST /api/evidence`（JSON 或 multipart）、`POST /api/assessment-jobs`
-- `GET /api/assessment-jobs/{id}`、`GET /api/assessment-jobs/{id}/events`（SSE）
-- `PATCH /api/assessments/{result_id}`（保留原结果，追加人工修订）
+默认 `DEMO_AGENT_MODE=true`，worker 使用确定性模拟判断但仍经过同一个后端评分函数。真实 Deep Agents 仅从 Git 忽略的 `.env` 读取配置：
+
+```dotenv
+DEMO_AGENT_MODE=false
+OPENAI_COMPATIBLE_MODEL=qwen3.5-plus
+OPENAI_COMPATIBLE_BASE_URL=https://your-openai-compatible-endpoint/v1
+OPENAI_COMPATIBLE_API_KEY=replace-with-local-secret
+VISION_ENABLED=false
+```
+
+不要提交或记录真实密钥。只有模型明确支持视觉且 `VISION_ENABLED=true` 时才接受 JPG/PNG。
+
+## V2 API
+
+- `GET /api/v2/rubrics/current`
+- `GET /api/v2/skills/{code}/scoring-rubric`
+- `POST /api/v2/scoring-rubrics/drafts`
+- `PATCH /api/v2/scoring-rubrics/{id}`
+- `POST /api/v2/scoring-rubrics/{id}/publish`
+- `GET /api/v2/targets`
+- `PUT /api/v2/targets/{grade}/{term}/{skill_code}`
+- `POST /api/v2/assessment-jobs`
+- `GET /api/v2/assessment-jobs/{id}`
+- `GET /api/v2/assessment-jobs/{id}/events`
+- `POST /api/v2/assessments/{result_id}/revisions`
+- `GET /api/v2/students/{id}/skills/{code}/history`
+- `GET /api/v2/dashboard/{school|class|student}/{id}`
+
+任务锁定量规、评分配置、目标、学生和证据快照。worker 按 `evidence_extractor → rubric_assessor → host scoring → feedback_writer` 顺序执行，最多重试两次。修订追加保存并由后端重算；不同量规或评分版本不连成同一趋势。
+
+## Figma 与前端
+
+Figma 设计文件：[凯风雨旸小学素养评估系统｜学校总览与个人画像](https://www.figma.com/design/O6v7M50dNj5vVYM5lkHOR6)
+
+设计含学校总览和个人画像的 1440/390 页面，以及 834 平板规则。React 使用现有 CSS 与 ECharts，不引入 Tailwind、Motion、UI 组件库或状态库。图表有文字替代；区间不取中点，未观察不画为 0；支持 `prefers-reduced-motion`。
 
 ## 验证
 
 ```sh
 rtk uv run pytest -q
-cd frontend
-rtk pnpm test
-rtk pnpm typecheck
-rtk pnpm build
-rtk pnpm test:e2e
+rtk uv run ruff check backend tools
+rtk pnpm --dir frontend test
+rtk pnpm --dir frontend typecheck
+rtk pnpm --dir frontend build
+rtk pnpm --dir frontend test:e2e
+rtk git diff --check
 ```
 
-E2E 通过浏览器提交“模拟测试数据”证据、创建任务，在一个子进程中运行 worker，再检查 SSE/轮询完成及学生、学校视图刷新。首次运行如缺 Chromium，执行 `rtk pnpm exec playwright install chromium`。
+E2E 使用隔离 SQLite，完成“上传 TXT/文字证据 → 创建 V2 任务 → worker → SSE 完成 → 个人刷新 → 学校刷新”，并验证 375、768、1440 宽度无页面级横向溢出。

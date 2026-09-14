@@ -59,7 +59,11 @@ def test_v2_dashboards_preserve_goal_capability_skill_hierarchy_without_totals()
         "median_level",
         "coverage",
         "target_status_counts",
+        "score_points",
+        "score_intervals",
     }
+    assert all(0 <= value <= 600 for value in first_skill["score_points"])
+    assert all(item["lower"] <= item["upper"] for item in first_skill["score_intervals"])
 
 
 def test_v2_dashboard_unknown_scope_or_subject_is_404():

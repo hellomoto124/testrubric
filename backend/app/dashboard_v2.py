@@ -89,6 +89,18 @@ def _summarize(items, eligible_count):
         "eligible_count": eligible_count,
         "coverage": len(assessed) / eligible_count if eligible_count else 0,
         "target_status_counts": dict(statuses),
+        "score_points": [
+            item["score_display"]
+            for item in assessed
+            if item.get("score_state") == "exact" and item.get("score_display") is not None
+        ],
+        "score_intervals": [
+            {"lower": item["score_lower"], "upper": item["score_upper"]}
+            for item in assessed
+            if item.get("score_state") == "bounded"
+            and item.get("score_lower") is not None
+            and item.get("score_upper") is not None
+        ],
     }
 
 
