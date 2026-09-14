@@ -46,8 +46,9 @@ def initialize(rubric: dict) -> None:
             CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, stage TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """
         )
+        connection.execute("UPDATE schools SET name = ? WHERE is_simulated_test_data = 1 AND name = ?", ("凯风雨旸小学（模拟测试数据）", "模拟测试学校"))
         if not connection.execute("SELECT count(*) FROM schools").fetchone()[0]:
-            connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("模拟测试学校",))
+            connection.execute("INSERT INTO schools VALUES (1, ?, 1)", ("凯风雨旸小学（模拟测试数据）",))
             connection.executemany("INSERT INTO classes VALUES (?, 1, ?, 1)", [(number, f"模拟测试班级{number}") for number in range(1, 4)])
             connection.executemany(
                 "INSERT INTO students VALUES (?, ?, ?, 1)",
