@@ -20,6 +20,8 @@ from .database import (
 )
 from .database import create_evidence as save_evidence
 from .database import current_rubric as load_current_rubric
+from .database import append_v2_revision, create_v2_job, get_v2_job, v2_history
+from .assessment_v2 import score as score_v2
 from .rubric_v2 import (
     V2Conflict,
     V2Invalid,
@@ -99,6 +101,42 @@ async def update_scoring_rubric_v2(config_id: int, request: Request) -> dict:
 @app.post("/api/v2/scoring-rubrics/{config_id}/publish")
 def publish_v2(config_id: int):
     return v2_result(lambda: publish_config(config_id))
+
+
+@app.post("/api/v2/assessment-jobs", status_code=201)
+async def create_assessment_job_v2(request: Request) -> dict:
+    payload = await request.json()
+    if set(payload) != {"student_id", "skill_code", "evidence_refs", "idempotency_key"} or not isinstance(payload["idempotency_key"], str) or not payload["idempotency_key"]:
+        raise HTTPException(422, "student_id, skill_code, evidence_refs, idempotency_key are required")
+    try:
+        return create_v2_job(payload["student_id"], payload["skill_code"], payload["evidence_refs"], get_published_config(payload["skill_code"]), payload["idempotency_key"])
+    except (ValueError, V2NotFound) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/v2/assessment-jobs/{job_id}")
+def get_assessment_job_v2(job_id: int) -> dict:
+    job = get_v2_job(job_id)
+    if not job:
+        raise HTTPException(404, "job does not exist")
+    return job
+
+
+@app.post("/api/v2/assessments/{job_id}/revisions", status_code=201)
+async def revise_assessment_v2(job_id: int, request: Request) -> dict:
+    payload = await request.json()
+    if set(payload) != {"judgments", "reason"} or not isinstance(payload["judgments"], list) or not isinstance(payload["reason"], str) or not payload["reason"].strip():
+        raise HTTPException(422, "judgments and reason are required")
+    job = get_v2_job(job_id)
+    if not job:
+        raise HTTPException(404, "job does not exist")
+    result = score_v2(job["config_snapshot"], payload["judgments"]) | {"judgments": payload["judgments"], "reason": payload["reason"]}
+    return append_v2_revision(job_id, result, "manual_revision")
+
+
+@app.get("/api/v2/students/{student_id}/skills/{skill_code}/history")
+def assessment_history_v2(student_id: int, skill_code: str) -> dict:
+    return v2_history(student_id, skill_code)
 
 
 @app.get("/api/v2/targets")
