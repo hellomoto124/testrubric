@@ -173,3 +173,8 @@ def test_a16_target_changes_not_score():
 def test_a17_deterministic():
     data = judgments(complete_to(2, (0.5, 0, 0)))
     assert anchor_interp_v1(config(), data) == anchor_interp_v1(config(), data)
+
+
+def test_a18_higher_complete_after_lower_gap_needs_review():
+    data = judgments({1: [3, 0, 0], 2: [4, 4, 4]})
+    assert anchor_interp_v1(config(), data)["score_state"] == "needs_review"

@@ -71,9 +71,15 @@ def parse(source=SOURCE):
             "sheet_name": "素养量规表-260910",
             "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         },
-        "school_rule": {
-            "grades": "3-6",
-            "bands": {"basic": 2, "mastery": 3, "excellent": 4},
+        "school_target_policy": {
+            "source_kind": "school_local",
+            "is_simulated_test_data": True,
+            "not_official_future9": True,
+            "target_version": "yy-grade3-6-default-v1",
+            "grade_band": "3-6",
+            "basic": 2,
+            "mastery": 3,
+            "excellent": 4,
             "default_target": 3,
         },
         "goals": goals,

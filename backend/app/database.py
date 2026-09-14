@@ -18,6 +18,7 @@ DEMO_NOTICE = "模拟测试数据；AI自动评估；非正式。"
 @contextmanager
 def connect():
     connection = sqlite3.connect(DATABASE_PATH)
+    connection.execute("PRAGMA foreign_keys=ON")
     try:
         yield connection
         connection.commit()
@@ -115,11 +116,13 @@ def _initialize_v2(connection):
             encoding="utf-8"
         )
     )
+    if connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='skills_v2'").fetchone():
+        connection.executescript("DROP TABLE IF EXISTS indicator_anchors_v2; DROP TABLE IF EXISTS indicators_v2; DROP TABLE IF EXISTS indicator_groups_v2; DROP TABLE IF EXISTS scoring_configs_v2; DROP TABLE IF EXISTS target_policies_v2; DROP TABLE IF EXISTS levels_v2; DROP TABLE IF EXISTS skills_v2; DROP TABLE IF EXISTS capabilities_v2; DROP TABLE IF EXISTS education_goals_v2; DROP TABLE IF EXISTS rubric_versions_v2;")
     connection.executescript("""
     CREATE TABLE IF NOT EXISTS rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, source TEXT NOT NULL, scoring_version TEXT NOT NULL DEFAULT 'anchor_interp_v1', is_simulated_test_data INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS education_goals_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT UNIQUE NOT NULL, name TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS education_goals_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT NOT NULL, name TEXT NOT NULL, UNIQUE(rubric_id, code));
     CREATE TABLE IF NOT EXISTS capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), goal_id INTEGER NOT NULL REFERENCES education_goals_v2(id), code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS skills_v2 (id INTEGER PRIMARY KEY, capability_id INTEGER NOT NULL REFERENCES capabilities_v2(id), code TEXT UNIQUE NOT NULL, subskill TEXT NOT NULL, name_cn TEXT NOT NULL, name_en TEXT NOT NULL, source TEXT NOT NULL, excel_row INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS skills_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), capability_id INTEGER NOT NULL REFERENCES capabilities_v2(id), code TEXT NOT NULL, subskill TEXT NOT NULL, name_cn TEXT NOT NULL, name_en TEXT NOT NULL, source TEXT NOT NULL, excel_row INTEGER NOT NULL, UNIQUE(rubric_id, code));
     CREATE TABLE IF NOT EXISTS levels_v2 (id INTEGER PRIMARY KEY, skill_id INTEGER NOT NULL REFERENCES skills_v2(id), level INTEGER NOT NULL, descriptors TEXT NOT NULL, UNIQUE(skill_id, level));
     CREATE TABLE IF NOT EXISTS scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT UNIQUE NOT NULL, status TEXT NOT NULL, calibration_status TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS indicator_groups_v2 (id INTEGER PRIMARY KEY, config_id INTEGER NOT NULL REFERENCES scoring_configs_v2(id), skill_code TEXT NOT NULL, level INTEGER NOT NULL, code TEXT UNIQUE NOT NULL);
@@ -156,7 +159,7 @@ def _initialize_v2(connection):
             (rubric_id, goal["code"], goal["name"]),
         )
         goals[goal["name"]] = connection.execute(
-            "SELECT id FROM education_goals_v2 WHERE code = ?", (goal["code"],)
+            "SELECT id FROM education_goals_v2 WHERE rubric_id = ? AND code = ?", (rubric_id, goal["code"])
         ).fetchone()[0]
     for capability in data["capabilities"]:
         connection.execute(
@@ -170,12 +173,13 @@ def _initialize_v2(connection):
             ),
         )
         cap_id = connection.execute(
-            "SELECT id FROM capabilities_v2 WHERE code = ?", (capability["code"],)
+            "SELECT id FROM capabilities_v2 WHERE rubric_id = ? AND code = ?", (rubric_id, capability["code"])
         ).fetchone()[0]
         for skill in capability["skills"]:
             connection.execute(
-                "INSERT OR IGNORE INTO skills_v2 (capability_id, code, subskill, name_cn, name_en, source, excel_row) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO skills_v2 (rubric_id, capability_id, code, subskill, name_cn, name_en, source, excel_row) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
+                    rubric_id,
                     cap_id,
                     skill["code"],
                     skill["subskill"],
@@ -186,7 +190,7 @@ def _initialize_v2(connection):
                 ),
             )
             skill_id = connection.execute(
-                "SELECT id FROM skills_v2 WHERE code = ?", (skill["code"],)
+                "SELECT id FROM skills_v2 WHERE rubric_id = ? AND code = ?", (rubric_id, skill["code"])
             ).fetchone()[0]
             connection.execute(
                 "INSERT OR IGNORE INTO scoring_configs_v2 (rubric_id, code, status, calibration_status, is_simulated_test_data) VALUES (?, ?, 'published', 'uncalibrated', 1)",

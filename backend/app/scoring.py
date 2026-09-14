@@ -86,6 +86,13 @@ def anchor_interp_v1(config, judgments, target_level=None):
             "attained_level": None,
             "target_status": "needs_review",
         }
+    incomplete_seen = False
+    for level in config:
+        values = [judgments.get(indicator_id, {"state": "unknown"}) for indicator_id, _weight in _items(level)]
+        complete = all(item.get("state") == "observed" and item.get("score") == 4 for item in values)
+        if incomplete_seen and complete:
+            return base | {"score_state": "needs_review", "attained_level": None, "target_status": "needs_review"}
+        incomplete_seen = incomplete_seen or not complete
     if not any(state == "observed" for state in states):
         return base | {
             "score_state": "insufficient_evidence",
