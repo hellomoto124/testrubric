@@ -16,7 +16,7 @@ rtk pnpm --dir frontend install
 后端首次启动会初始化 SQLite。演示种子可重复运行，不触碰非模拟学生或真实/人工结果。
 
 ```sh
-rtk uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+rtk uv run --env-file .env uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 rtk uv run --env-file .env python -m backend.app.worker
 rtk pnpm --dir frontend dev --host 127.0.0.1 --port 5173
 ```
@@ -63,6 +63,10 @@ VISION_ENABLED=false
 - `POST /api/v2/assessments/{result_id}/revisions`
 - `GET /api/v2/students/{id}/skills/{code}/history`
 - `GET /api/v2/dashboard/{school|class|student}/{id}`
+- `GET /api/v2/scoring-rubrics?skill_code={code}`
+- `GET /api/v2/reports/audit`
+- `GET /api/v2/system/status`
+- `PUT /api/v2/system/settings`
 
 任务锁定量规、评分配置、目标、学生和证据快照。worker 按 `evidence_extractor → rubric_assessor → host scoring → feedback_writer` 顺序执行，最多重试两次。修订追加保存并由后端重算；不同量规或评分版本不连成同一趋势。
 
@@ -71,6 +75,8 @@ VISION_ENABLED=false
 Figma 设计文件：[凯风雨旸小学素养评估系统｜学校总览与个人画像](https://www.figma.com/design/O6v7M50dNj5vVYM5lkHOR6)
 
 设计含学校总览和个人画像的 1440/390 页面，以及 834 平板规则。React 使用现有 CSS 与 ECharts，不引入 Tailwind、Motion、UI 组件库或状态库。图表有文字替代；区间不取中点，未观察不画为 0；支持 `prefers-reduced-motion`。
+
+侧栏首期管理页面包括：素养体系（目标与评分配置版本）、报告中心（学校/班级/个人/审计网页报告）和系统设置（学期、模型脱敏状态、worker、数据库与量规健康状态）。系统设置不显示或修改API Key，也不提供删除、重置、正式权限或多学校配置。
 
 ## 验证
 

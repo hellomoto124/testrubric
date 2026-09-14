@@ -133,8 +133,18 @@ def _initialize_v2(connection):
     CREATE TABLE IF NOT EXISTS assessment_judgments_v2 (id INTEGER PRIMARY KEY, result_id INTEGER NOT NULL REFERENCES assessment_results_v2(id), indicator_id INTEGER NOT NULL, state TEXT NOT NULL, ordinal_score INTEGER, evidence_refs TEXT NOT NULL, fragment_locator TEXT NOT NULL, reason TEXT NOT NULL, support_context TEXT NOT NULL, UNIQUE(result_id, indicator_id));
     CREATE TABLE IF NOT EXISTS assessment_revisions_v2 (id INTEGER PRIMARY KEY, original_result_id INTEGER NOT NULL REFERENCES assessment_results_v2(id), revised_result_id INTEGER NOT NULL REFERENCES assessment_results_v2(id), reason TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS job_events_v2 (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES assessment_jobs_v2(id), stage TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS system_settings_v2 (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS worker_runtime_v2 (id INTEGER PRIMARY KEY CHECK (id = 1), heartbeat REAL NOT NULL);
     """)
     _upgrade_v2_job_columns(connection)
+    connection.executemany(
+        "INSERT OR IGNORE INTO system_settings_v2 (key, value) VALUES (?, ?)",
+        [
+            ("academic_year", "2026-2027"),
+            ("term", "第一学期"),
+            ("default_grade", "三年级"),
+        ],
+    )
     connection.execute(
         "INSERT OR IGNORE INTO rubric_versions_v2 (code, source, is_simulated_test_data) VALUES (?, ?, 1)",
         (data["rubric_version"], "kai_feng_yuyang_260910.json"),

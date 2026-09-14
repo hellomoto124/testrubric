@@ -79,6 +79,13 @@ def scoring_rubric_v2(code: str) -> dict:
     return v2_result(lambda: get_published_config(code))
 
 
+@app.get("/api/v2/scoring-rubrics")
+def scoring_rubrics_v2(skill_code: str) -> dict:
+    from .admin_v2 import list_scoring_configs
+
+    return list_scoring_configs(skill_code)
+
+
 @app.get("/api/v2/scoring-rubrics/{config_id}")
 def scoring_rubric_detail_v2(config_id: int) -> dict:
     return v2_result(lambda: get_config(config_id))
@@ -218,6 +225,33 @@ def dashboard_v2(scope: str, subject_id: int, skill_code: str | None = None) -> 
     if not result:
         raise HTTPException(404, "dashboard scope or subject does not exist")
     return result
+
+
+@app.get("/api/v2/reports/audit")
+def report_audit_v2(limit: int = 30) -> dict:
+    from .admin_v2 import audit_report
+
+    try:
+        return audit_report(limit)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/v2/system/status")
+def system_status_v2() -> dict:
+    from .admin_v2 import system_status
+
+    return system_status()
+
+
+@app.put("/api/v2/system/settings")
+async def update_system_settings_v2(request: Request) -> dict:
+    from .admin_v2 import update_settings
+
+    try:
+        return update_settings(await request.json())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/v2/targets")

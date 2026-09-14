@@ -1,5 +1,6 @@
 import os
 import signal
+import sqlite3
 import time
 import uuid
 
@@ -268,7 +269,16 @@ def _process_legacy_job(job, agent_builder=None, model_factory=None):
 def run_worker(should_stop, poll_interval=0.1):
     recover_running_jobs_v2()
     recover_running_jobs()
+    next_heartbeat = 0.0
     while not should_stop():
+        if time.monotonic() >= next_heartbeat:
+            try:
+                from .admin_v2 import record_worker_heartbeat
+
+                record_worker_heartbeat()
+            except sqlite3.OperationalError:
+                pass
+            next_heartbeat = time.monotonic() + 5
         process_one_job()
         if should_stop():
             return

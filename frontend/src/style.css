@@ -167,6 +167,60 @@ form, .job-builder { display: grid; align-content: start; gap: .8rem; }
 .history-evidence ol { display: grid; gap: .65rem; padding-left: 1.25rem; }
 .history-evidence li { display: grid; gap: .15rem; }
 
+.module-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; padding: .4rem 0; }
+.module-heading h1 { margin: .2rem 0; color: #153c5d; font-size: 2rem; }
+.module-heading p { margin-bottom: 0; color: var(--muted); }
+.module-heading > span { padding: .55rem .75rem; border-radius: 6px; color: #286489; background: #eaf4fa; font-size: .78rem; }
+.rubric-workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-width: 0; border: 1px solid #dbe4ea; border-radius: 10px; background: #fff; }
+.rubric-tree { max-height: calc(100vh - 190px); overflow: auto; padding: 1rem; border-right: 1px solid #dbe4ea; }
+.rubric-tree details { margin-bottom: .8rem; }
+.rubric-tree summary { padding: .55rem; color: #174b70; font-weight: 700; }
+.rubric-tree div { display: grid; gap: .25rem; margin: .35rem 0 .7rem; }
+.rubric-tree div > b { padding: .4rem .55rem; color: #526c7f; font-size: .78rem; }
+.rubric-tree button { border: 0; padding: .5rem .6rem; background: #f7f9fa; text-align: left; font-size: .78rem; }
+.rubric-tree button.active { color: #155c82; background: #e9f5fa; box-shadow: inset 3px 0 var(--teal); }
+.rubric-detail { min-width: 0; padding: 1.3rem; }
+.rubric-toolbar { display: flex; flex-wrap: wrap; gap: .65rem; align-items: end; }
+.rubric-toolbar label { width: 180px; }
+.boundary-note { padding: .75rem 1rem; border-left: 3px solid var(--ochre); color: #6d5a31; background: #fff8e8; font-size: .82rem; }
+.success-note { color: #176d68; }
+.version-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .65rem; margin-bottom: 1.2rem; }
+.version-list article { display: grid; gap: .35rem; padding: .9rem; border: 1px solid #dce5ea; border-radius: 8px; background: #f9fbfc; }
+.version-list article > span { color: #187a76; }
+.review-columns { display: grid; grid-template-columns: 1fr 1.25fr .8fr; min-width: 760px; border: 1px solid #dde5ea; border-radius: 8px; overflow: hidden; }
+.review-columns > b { padding: .75rem; color: #456174; background: #f1f5f7; }
+.review-row { display: grid; grid-template-columns: 1fr 1.25fr .8fr; grid-column: 1 / -1; border-top: 1px solid #dde5ea; }
+.review-row > div { min-width: 0; padding: .8rem; }
+.review-row > div + div { border-left: 1px solid #e2e8ec; }
+.review-row p, .review-row li { font-size: .78rem; line-height: 1.55; }
+.review-row ol { padding-left: 1.2rem; }
+.target-history { color: var(--muted); font-size: .78rem; }
+.report-tabs { display: flex; gap: .45rem; border-bottom: 1px solid #dce5ea; }
+.report-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; }
+.report-tabs button.active { color: #155d83; border-bottom-color: var(--teal); }
+.report-filter { width: min(320px, 100%); }
+.report-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem; }
+.report-metrics div { display: grid; gap: .2rem; padding: 1rem; border: 1px solid #dce5ea; border-radius: 8px; background: #fff; }
+.report-metrics b { color: #153c5d; font-size: 1.65rem; }
+.report-goals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; }
+.report-goals article { display: grid; gap: .45rem; padding: 1rem; border: 1px solid #dce5ea; border-radius: 8px; background: #fff; }
+.report-goals article > b { color: var(--teal); }
+.report-goals ul { margin: .3rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+.audit-table, .failure-list { padding: 1rem; border: 1px solid #dce5ea; border-radius: 8px; background: #fff; }
+.audit-table table { width: 100%; min-width: 900px; border-collapse: collapse; font-size: .78rem; }
+.audit-table th, .audit-table td { padding: .7rem; border-bottom: 1px solid #e2e8ec; text-align: left; }
+.settings-form { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; max-width: none; border-radius: 10px; }
+.settings-form h2, .settings-form .success-note { grid-column: 1 / -1; }
+.system-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .8rem; }
+.system-grid article { min-width: 0; padding: 1rem; border: 1px solid #dce5ea; border-radius: 8px; background: #fff; }
+.system-grid dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem .8rem; margin: 0; }
+.system-grid dl > span { display: contents; }
+.system-grid dt { color: var(--muted); }
+.system-grid dd { min-width: 0; margin: 0; overflow-wrap: anywhere; text-align: right; }
+.health { display: inline-block; padding: .45rem .7rem; border-radius: 999px; }
+.health.online { color: #176d68; background: #e8f5f1; }
+.health.offline { color: #8b541a; background: #fff1df; }
+
 @keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 @media (max-width: 1024px) {
@@ -178,6 +232,9 @@ form, .job-builder { display: grid; align-content: start; gap: .8rem; }
   .skill-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .analysis-board { grid-template-columns: 220px minmax(0, 1fr); }
   .distribution-panel { grid-column: 1 / -1; border-top: 1px solid #e0e7ec; border-left: 0 !important; }
+  .rubric-workspace { grid-template-columns: 220px minmax(0, 1fr); }
+  .report-goals, .system-grid { grid-template-columns: 1fr; }
+  .settings-form { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 767px) {
@@ -214,6 +271,12 @@ form, .job-builder { display: grid; align-content: start; gap: .8rem; }
   .analysis-board > * + * { border-top: 1px solid #e0e7ec; border-left: 0; }
   .distribution-panel { grid-column: auto; }
   .school-ruler { font-size: .62rem; }
+  .rubric-workspace { grid-template-columns: 1fr; }
+  .rubric-tree { max-height: 360px; border-right: 0; border-bottom: 1px solid #dbe4ea; }
+  .rubric-detail { overflow: auto; }
+  .report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-goals, .system-grid, .settings-form { grid-template-columns: 1fr; }
+  .module-heading { align-items: flex-start; flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {

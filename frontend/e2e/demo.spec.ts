@@ -61,3 +61,27 @@ test("375, 768 and 1440 widths do not horizontally overflow", async ({ page }) =
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
 });
+
+test("administrator can open rubric, report and safe system settings", async ({ page }) => {
+  await page.goto("/");
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+
+  await navigation.getByRole("button", { name: /素养体系/ }).click();
+  await expect(page.getByRole("heading", { name: "素养体系" })).toBeVisible();
+  await expect(page.getByText("评分配置版本")).toBeVisible();
+  await expect(page.getByText(/默认组间等权、组内等权/)).toBeVisible();
+
+  await navigation.getByRole("button", { name: /报告中心/ }).click();
+  await expect(page.getByRole("heading", { name: "报告中心" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "学校报告" })).toBeVisible();
+  await page.getByRole("button", { name: "评估审计" }).click();
+  await expect(page.getByRole("heading", { name: "最近评估审计" })).toBeVisible();
+
+  await navigation.getByRole("button", { name: /系统设置/ }).click();
+  await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "千问模型" })).toBeVisible();
+  await page.getByLabel("学年", { exact: true }).fill("2027-2028");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  await expect(page.getByText("演示系统设置已保存。")).toBeVisible();
+  await expect(page.getByText(/密钥只显示“已配置”/)).toBeVisible();
+});

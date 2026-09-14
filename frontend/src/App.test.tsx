@@ -15,7 +15,17 @@ const dashboard = { scope: { type: "school", id: 1 }, subject: { id: 1, name: "�
 function mockApi() {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    const body = url === "/api/demo/context" ? context : url === "/api/v2/rubrics/current" ? { hierarchy: goals } : url.includes("/api/v2/dashboard/") ? dashboard : url.includes("/profile") ? { evidence_timeline: [] } : url.includes("/history") ? { items: [] } : {};
+    const body = url === "/api/demo/context" ? context
+      : url === "/api/v2/rubrics/current" ? { hierarchy: goals }
+      : url.includes("/api/v2/dashboard/") ? dashboard
+      : url.includes("/scoring-rubrics?") ? { items: [{ id: 1, skill_code: "YY.S01", version: 1, status: "published", calibration_status: "uncalibrated", group_count: 6 }] }
+      : url.includes("/skills/YY.S01/scoring-rubric") ? { id: 1, skill_code: "YY.S01", version: 1, status: "published", groups: [] }
+      : url.includes("/targets") ? { items: [{ skill_code: "YY.S01", target_level: 3, target_version: "v1" }] }
+      : url.includes("/reports/audit") ? { items: [] }
+      : url.includes("/system/status") ? { settings: { academic_year: "2026-2027", term: "第一学期", default_grade: "三年级" }, model: { name: "qwen-test", base_url: "https://example.invalid/v1", api_key_configured: true, vision_enabled: false, demo_agent_mode: true }, worker: { status: "online", jobs: {} }, database: { status: "ok" }, data_counts: { students: 20, evidence: 60, v2_results: 228 }, rubric: { code: "kai_feng_yuyang_260910", scoring_version: "anchor_interp_v1", skills: 38 }, recent_failures: [] }
+      : url.includes("/profile") ? { evidence_timeline: [] }
+      : url.includes("/history") ? { items: [] }
+      : {};
     return Promise.resolve({ ok: true, json: async () => body, text: async () => JSON.stringify(body) });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -67,5 +77,17 @@ describe("凯风雨旸小学 V2 UI", () => {
     expect(await screen.findByRole("heading", { name: "教师工作台" })).toBeInTheDocument();
     expect(screen.getByLabelText("任务情境")).toHaveValue("课堂合作任务");
     expect(screen.getByLabelText("帮助程度")).toHaveValue("教师仅澄清任务");
+  });
+
+  test("opens rubric, report and system first-phase pages from the sidebar", async () => {
+    mockApi();
+    render(<App />);
+    const navigation = screen.getByRole("navigation", { name: "主导航" });
+    fireEvent.click(within(navigation).getByRole("button", { name: /素养体系/ }));
+    expect(await screen.findByRole("heading", { name: "素养体系" })).toBeInTheDocument();
+    fireEvent.click(within(navigation).getByRole("button", { name: /报告中心/ }));
+    expect(await screen.findByRole("heading", { name: "报告中心" })).toBeInTheDocument();
+    fireEvent.click(within(navigation).getByRole("button", { name: /系统设置/ }));
+    expect(await screen.findByRole("heading", { name: "系统设置" })).toBeInTheDocument();
   });
 });
