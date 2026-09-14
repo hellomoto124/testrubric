@@ -1,56 +1,57 @@
 from decimal import ROUND_HALF_UP, Decimal
 
 
-def _level_values(level_config, judgments, unknown):
-    raw = judgments.get(level_config["level"], [])
-    groups = level_config.get("groups")
-    if not groups:
-        return [(Decimal(1) / len(level_config["indicators"]), unknown if value == "unknown" else Decimal(str(value))) for value in raw]
-    values = []
-    for group_index, group in enumerate(groups):
-        items = raw.get(group_index, []) if isinstance(raw, dict) else raw
-        group_weight = Decimal(str(group.get("weight", 1 / len(groups))))
-        weights = [Decimal(str(item.get("weight", 1 / len(group["indicators"])))) for item in group["indicators"]]
-        if not items or len(items) != len(weights) or sum(weights) != 1:
-            raise ValueError("invalid indicator weights or judgments")
-        values.extend((group_weight * weight, unknown if value == "unknown" else Decimal(str(value))) for weight, value in zip(weights, items))
-    if sum(weight for weight, _value in values) != 1:
+def _items(level):
+    groups = level["groups"]
+    if not groups or abs(sum(Decimal(str(group["weight"])) for group in groups) - 1) > Decimal("0.000001"):
         raise ValueError("invalid group weights")
-    return values
+    result = []
+    for group in groups:
+        indicators = group["indicators"]
+        if not indicators or abs(sum(Decimal(str(item["weight"])) for item in indicators) - 1) > Decimal("0.000001"):
+            raise ValueError("invalid indicator weights")
+        result.extend((item["id"], Decimal(str(group["weight"])) * Decimal(str(item["weight"]))) for item in indicators)
+    return result
 
 
 def _score(config, judgments, unknown):
     complete = 0
-    for item in config:
-        values = _level_values(item, judgments, unknown)
-        if not values or not all(value == 4 for _weight, value in values):
-            progress = sum(weight * value for weight, value in values) / 4 if values else Decimal(0)
+    for level in config:
+        values = []
+        for indicator_id, weight in _items(level):
+            judgment = judgments.get(indicator_id, {"state": "unknown"})
+            state = judgment["state"]
+            value = unknown if state == "unknown" else Decimal(str(judgment["score"]))
+            if state not in {"observed", "unknown", "unrelated"} or value < 0 or value > 4:
+                raise ValueError("invalid judgment")
+            values.append((weight, value))
+        if not all(value == 4 for _weight, value in values):
+            progress = sum(weight * value for weight, value in values) / 4
             return complete, progress, Decimal(complete * 100) + progress * 100
-        complete = item["level"]
+        complete = level["level"]
     return 6, Decimal(0), Decimal(600)
 
 
-def anchor_interp_v1(config, judgments, target=None):
-    flat = [value for values in judgments.values() for value in (values.values() if isinstance(values, dict) else [values]) for value in (value if isinstance(value, list) else [value])]
-    if any(type(value) is not int and value not in {"unknown", "conflict"} or type(value) is int and not 0 <= value <= 4 for value in flat):
-        raise ValueError("invalid judgment")
-    if "conflict" in flat:
-        return {"score_state": "needs_review", "attained_level": None, "score_raw": None, "score_display": None, "scoring_version": "anchor_interp_v1"}
-    if not [value for value in flat if value != "unknown"]:
-        return {"score_state": "insufficient_evidence", "attained_level": None, "score_raw": None, "score_display": None, "scoring_version": "anchor_interp_v1"}
+def anchor_interp_v1(config, judgments, target_level=None):
+    states = [judgment.get("state") for judgment in judgments.values()]
+    base = {"next_level": None, "next_level_progress": None, "score_raw": None, "score_display": None, "score_lower": None, "score_upper": None, "target_level": target_level, "target_score": target_level * 100 if target_level else None, "target_gap": None, "target_gap_lower": None, "target_gap_upper": None, "scoring_version": "anchor_interp_v1"}
+    if "conflict" in states:
+        return base | {"score_state": "needs_review", "attained_level": None, "target_status": "needs_review"}
+    if not any(state == "observed" for state in states):
+        return base | {"score_state": "insufficient_evidence", "attained_level": None, "target_status": "insufficient_evidence"}
     low_l, low_p, low = _score(config, judgments, Decimal(0))
     _high_l, _high_p, high = _score(config, judgments, Decimal(4))
-    exact = "unknown" not in flat
-    target_score = Decimal(target * 100) if target else None
-    if target_score is None:
+    bounded = "unknown" in states
+    target = Decimal(target_level * 100) if target_level else None
+    if target is None:
         target_status, gap = "not_configured", None
-    elif exact:
-        target_status = "below_target" if low < target_score else "meets_target" if low == target_score else "above_target"
-        gap = low - target_score
-    elif high < target_score:
-        target_status, gap = "below_target", (low - target_score, high - target_score)
-    elif low > target_score:
-        target_status, gap = "above_target", (low - target_score, high - target_score)
+    elif not bounded:
+        target_status = "below_target" if low < target else "meets_target" if low == target else "above_target"
+        gap = low - target
+    elif high < target:
+        target_status, gap = "below_target", (low - target, high - target)
+    elif low > target:
+        target_status, gap = "above_target", (low - target, high - target)
     else:
-        target_status, gap = "uncertain", (low - target_score, high - target_score)
-    return {"score_state": "exact" if exact else "bounded", "attained_level": low_l or None, "next_level": None if low_l == 6 else low_l + 1, "next_level_progress": None if low_l == 6 else float(low_p), "score_raw": float(low) if exact else None, "score_display": int(low.quantize(Decimal(1), rounding=ROUND_HALF_UP)) if exact else None, "score_lower": None if exact else float(low), "score_upper": None if exact else float(high), "target_level": target, "target_score": float(target_score) if target_score else None, "target_gap": float(gap) if isinstance(gap, Decimal) else None, "target_gap_lower": float(gap[0]) if isinstance(gap, tuple) else None, "target_gap_upper": float(gap[1]) if isinstance(gap, tuple) else None, "target_status": target_status, "scoring_version": "anchor_interp_v1"}
+        target_status, gap = "uncertain", (low - target, high - target)
+    return base | {"score_state": "bounded" if bounded else "exact", "attained_level": low_l or None, "next_level": None if low_l == 6 else low_l + 1, "next_level_progress": None if low_l == 6 else float(low_p), "score_raw": None if bounded else float(low), "score_display": None if bounded else int(low.quantize(Decimal(1), rounding=ROUND_HALF_UP)), "score_lower": float(low) if bounded else None, "score_upper": float(high) if bounded else None, "target_status": target_status, "target_gap": float(gap) if isinstance(gap, Decimal) else None, "target_gap_lower": float(gap[0]) if isinstance(gap, tuple) else None, "target_gap_upper": float(gap[1]) if isinstance(gap, tuple) else None}
