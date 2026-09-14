@@ -38,6 +38,9 @@ def test_v2_job_locks_config_target_and_rejects_cross_student_evidence():
         created = _job(client, "v2-lock", evidence_id=evidence["id"])
         repeated = _job(client, "v2-lock", evidence_id=evidence["id"])
         rejected = _job(client, "v2-cross", student_id=2, evidence_id=evidence["id"])
+        conflicting_key = _job(
+            client, "v2-lock", student_id=2, evidence_id=_evidence(client, 2)["id"]
+        )
 
     assert created.status_code == repeated.status_code == 201
     assert created.json()["id"] == repeated.json()["id"]
@@ -45,6 +48,8 @@ def test_v2_job_locks_config_target_and_rejects_cross_student_evidence():
     assert created.json()["target_snapshot"]["target_level"] == 3
     assert created.json()["rubric_code"] == "kai_feng_yuyang_260910"
     assert rejected.status_code == 422
+    assert conflicting_key.status_code == 422
+    assert "idempotency" in conflicting_key.json()["detail"]
 
 
 def test_v2_demo_worker_uses_host_scorer_and_sse_reaches_terminal_state():
@@ -218,3 +223,50 @@ def test_v2_real_deepagents_graph_runs_three_stages_with_scripted_model(monkeypa
     assert completed["status"] == "succeeded"
     assert completed["result"]["feedback"] == "继续收集跨情境证据。"
     assert completed["result"]["scoring_version"] == "anchor_interp_v1"
+
+
+def test_v2_rejects_out_of_order_dispatch_even_when_completion_order_is_correct(monkeypatch):
+    from app.database import get_v2_job
+    from app.worker import process_one_job
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    monkeypatch.setenv("DEMO_AGENT_MODE", "false")
+    with TestClient(app) as client:
+        job = _job(client, "v2-bad-dispatch").json()
+
+    class BadDispatchAgent:
+        def stream(self, *_args, **_kwargs):
+            for index, name in enumerate(
+                ("feedback_writer", "evidence_extractor", "rubric_assessor"), 1
+            ):
+                yield {
+                    "model": {
+                        "messages": [
+                            AIMessage(
+                                content="",
+                                tool_calls=[
+                                    {
+                                        "name": "task",
+                                        "args": {"subagent_type": name, "description": "x"},
+                                        "id": f"bad-{index}",
+                                    }
+                                ],
+                            )
+                        ]
+                    }
+                }
+            for index in (2, 3, 1):
+                yield {
+                    "tools": {
+                        "messages": [
+                            ToolMessage(content="done", name="task", tool_call_id=f"bad-{index}")
+                        ]
+                    }
+                }
+
+    def builder(*_args):
+        return BadDispatchAgent()
+
+    assert process_one_job(agent_builder=builder, model_factory=lambda: object()) is None
+    assert get_v2_job(job["id"])["status"] == "queued"
+    assert "dispatch" in get_v2_job(job["id"])["error"]

@@ -1302,10 +1302,29 @@ def create_v2_job(
 ) -> dict:
     with connect() as connection:
         existing = connection.execute(
-            "SELECT id FROM assessment_jobs_v2 WHERE idempotency_key = ?",
+            """SELECT id, student_id, skill_code, evidence_refs, context,
+            support_level, period FROM assessment_jobs_v2 WHERE idempotency_key = ?""",
             (idempotency_key,),
         ).fetchone()
         if existing:
+            request_identity = (
+                student_id,
+                skill_code,
+                evidence_refs,
+                context,
+                support_level,
+                period,
+            )
+            stored_identity = (
+                existing[1],
+                existing[2],
+                json.loads(existing[3]),
+                existing[4],
+                existing[5],
+                existing[6],
+            )
+            if request_identity != stored_identity:
+                raise ValueError("idempotency key conflicts with another request")
             return get_v2_job(existing[0])
         marks = ",".join("?" for _ in evidence_refs)
         valid_refs = evidence_refs and connection.execute(

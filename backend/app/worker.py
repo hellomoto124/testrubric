@@ -121,6 +121,7 @@ def _process_v2_job(job, agent_builder=None, model_factory=None):
         )
         required = ["evidence_extractor", "rubric_assessor", "feedback_writer"]
         completed = []
+        dispatched = []
         task_types = {}
         for update in agent.stream(
             {
@@ -140,6 +141,9 @@ def _process_v2_job(job, agent_builder=None, model_factory=None):
                     for call in getattr(message, "tool_calls", []):
                         name = call.get("args", {}).get("subagent_type")
                         if call.get("name") == "task" and call.get("id") and name in required:
+                            if len(dispatched) >= len(required) or name != required[len(dispatched)]:
+                                raise RuntimeError("V2 subagent dispatch order is invalid")
+                            dispatched.append(name)
                             task_types[call["id"]] = name
                     call_id = getattr(message, "tool_call_id", None)
                     if getattr(message, "name", None) == "task" and call_id in task_types:
@@ -154,7 +158,7 @@ def _process_v2_job(job, agent_builder=None, model_factory=None):
                             if not host_result:
                                 raise RuntimeError("rubric assessor did not submit judgments")
                             record_v2_event(job["id"], "host_scoring", "anchor_interp_v1")
-        if completed != required or not extraction or not host_result or not feedback:
+        if dispatched != required or completed != required or not extraction or not host_result or not feedback:
             raise RuntimeError("Deep Agents did not complete the V2 assessment contract")
         return append_v2_result(
             job["id"],
