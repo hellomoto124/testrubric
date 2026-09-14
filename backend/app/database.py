@@ -261,6 +261,32 @@ def _rebuild_generated_prerelease_v2(connection):
     ).fetchone()[0]
     if rubric_rows[0] > 1 or rubric_rows[1] or config_non_simulated:
         raise RuntimeError("pre-release V2 schema contains non-generated data")
+    target_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'target_policies_v2'"
+    ).fetchone()
+    if target_table:
+        cursor = connection.execute("SELECT * FROM target_policies_v2")
+        columns = [item[0] for item in cursor.description]
+        targets = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        expected_skills = {f"YY.S{index:02}" for index in range(1, 39)}
+        generated = (
+            not targets
+            or len(targets) == 38
+            and {row.get("skill_code") for row in targets} == expected_skills
+            and all(
+                row.get("grade") == "3-6"
+                and row.get("term") == "default"
+                and row.get("target_level") == 3
+                and row.get("target_version", "v1")
+                in {"v1", "yy-grade3-6-default-v1"}
+                and row.get("basic", 2) == 2
+                and row.get("mastery", 3) == 3
+                and row.get("excellent", 4) == 4
+                for row in targets
+            )
+        )
+        if not generated:
+            raise RuntimeError("pre-release V2 schema contains non-generated targets")
     connection.executescript(
         """
         DROP TABLE IF EXISTS indicator_anchors_v2;

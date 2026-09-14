@@ -171,3 +171,24 @@ def test_prerelease_schema_with_non_generated_data_is_not_deleted():
         initialize_v2()
     with connect() as connection:
         assert connection.execute("SELECT code FROM rubric_versions_v2").fetchone() == ("manual-version",)
+
+
+def test_prerelease_schema_with_manual_simulated_target_is_not_deleted():
+    with connect() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE, source TEXT, scoring_version TEXT, is_simulated_test_data INTEGER);
+            CREATE TABLE capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, goal_id INTEGER, code TEXT UNIQUE, name TEXT, description TEXT);
+            CREATE TABLE scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, code TEXT UNIQUE, status TEXT, calibration_status TEXT, is_simulated_test_data INTEGER);
+            CREATE TABLE target_policies_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, skill_code TEXT, grade TEXT, term TEXT, target_version TEXT, target_level INTEGER);
+            INSERT INTO rubric_versions_v2 VALUES (1, 'old-generated', 'old', 'anchor_interp_v1', 1);
+            INSERT INTO scoring_configs_v2 VALUES (1, 1, 'YY.S01.demo', 'published', 'uncalibrated', 1);
+            INSERT INTO target_policies_v2 VALUES (1, 1, 'YY.S01', '3-6', 'manual', 'manual-target-v1', 4);
+            """
+        )
+    with pytest.raises(RuntimeError, match="non-generated targets"):
+        initialize_v2()
+    with connect() as connection:
+        assert connection.execute(
+            "SELECT target_version FROM target_policies_v2"
+        ).fetchone() == ("manual-target-v1",)
