@@ -42,6 +42,26 @@ def current_rubric() -> dict:
     return load_current_rubric()
 
 
+@app.get("/api/v2/rubrics/current")
+def current_rubric_v2() -> dict:
+    from .database import v2_catalog
+    return v2_catalog()
+
+
+@app.get("/api/v2/skills/{code}/scoring-rubric")
+def scoring_rubric_v2(code: str) -> dict:
+    from .database import connect
+    with connect() as c:
+        row = c.execute("SELECT id FROM scoring_configs_v2 WHERE code = ? AND status = 'published'", (code + '.demo',)).fetchone()
+        if not row:
+            raise HTTPException(404, "published scoring rubric not found")
+        groups = []
+        for group_id, level, group_code in c.execute("SELECT id, level, code FROM indicator_groups_v2 WHERE config_id = ? ORDER BY level", row):
+            indicators = [dict(zip(("id", "weight"), item)) for item in c.execute("SELECT code, weight FROM indicators_v2 WHERE group_id = ?", (group_id,))]
+            groups.append({"id": group_code, "level": level, "indicators": indicators})
+    return {"code": code, "groups": groups}
+
+
 @app.get("/api/dashboard/school")
 def get_school_dashboard() -> dict:
     dashboard = school_dashboard()
