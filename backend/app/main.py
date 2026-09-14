@@ -45,21 +45,74 @@ def current_rubric() -> dict:
 @app.get("/api/v2/rubrics/current")
 def current_rubric_v2() -> dict:
     from .database import v2_catalog
+
     return v2_catalog()
 
 
 @app.get("/api/v2/skills/{code}/scoring-rubric")
 def scoring_rubric_v2(code: str) -> dict:
     from .database import connect
+
     with connect() as c:
-        row = c.execute("SELECT id FROM scoring_configs_v2 WHERE code = ? AND status = 'published'", (code + '.demo',)).fetchone()
+        row = c.execute(
+            "SELECT id FROM scoring_configs_v2 WHERE code = ? AND status = 'published'",
+            (code + ".demo",),
+        ).fetchone()
         if not row:
             raise HTTPException(404, "published scoring rubric not found")
         groups = []
-        for group_id, level, group_code in c.execute("SELECT id, level, code FROM indicator_groups_v2 WHERE config_id = ? ORDER BY level", row):
-            indicators = [dict(zip(("id", "weight"), item)) for item in c.execute("SELECT code, weight FROM indicators_v2 WHERE group_id = ?", (group_id,))]
+        for group_id, level, group_code in c.execute(
+            "SELECT id, level, code FROM indicator_groups_v2 WHERE config_id = ? ORDER BY level",
+            row,
+        ):
+            indicators = [
+                dict(zip(("id", "weight"), item))
+                for item in c.execute(
+                    "SELECT code, weight FROM indicators_v2 WHERE group_id = ?",
+                    (group_id,),
+                )
+            ]
             groups.append({"id": group_code, "level": level, "indicators": indicators})
     return {"code": code, "groups": groups}
+
+
+@app.post("/api/v2/scoring-rubrics/drafts", status_code=201)
+async def create_scoring_draft(request: Request) -> dict:
+    payload = await request.json()
+    if set(payload) != {"skill_code"}:
+        raise HTTPException(422, "only skill_code is allowed")
+    from .database import connect
+
+    with connect() as c:
+        row = c.execute(
+            "SELECT rubric_id FROM scoring_configs_v2 WHERE code=? AND status='published'",
+            (payload["skill_code"] + ".demo",),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "published rubric not found")
+        config_id = c.execute(
+            "INSERT INTO scoring_configs_v2 (rubric_id,code,status,calibration_status,is_simulated_test_data) VALUES (?,?,'draft','uncalibrated',1)",
+            (row[0], payload["skill_code"] + ".draft"),
+        ).lastrowid
+    return {"id": config_id, "status": "draft"}
+
+
+@app.post("/api/v2/scoring-rubrics/{config_id}/publish")
+def publish_v2(config_id: int):
+    from .database import connect
+
+    with connect() as c:
+        status = c.execute(
+            "SELECT status FROM scoring_configs_v2 WHERE id=?", (config_id,)
+        ).fetchone()
+        if not status:
+            raise HTTPException(404, "config not found")
+        if status[0] != "reviewed":
+            raise HTTPException(409, "config must be reviewed")
+        c.execute(
+            "UPDATE scoring_configs_v2 SET status='published' WHERE id=?", (config_id,)
+        )
+    return {"id": config_id, "status": "published"}
 
 
 @app.get("/api/dashboard/school")
