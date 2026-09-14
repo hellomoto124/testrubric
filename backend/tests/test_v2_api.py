@@ -133,6 +133,26 @@ def test_targets_are_versioned_and_filterable():
     assert targets.json()["items"][0]["target_version"] == "yy-2026-1-v1"
 
 
+def test_target_queries_and_current_catalog_ignore_other_rubrics():
+    from app.database import v2_catalog
+
+    with TestClient(app) as client:
+        from test_rubric_v2 import insert_second_rubric
+
+        insert_second_rubric()
+        targets = client.get(
+            "/api/v2/targets",
+            params={"grade": "3-6", "term": "manual", "skill_code": "YY.S01"},
+        )
+        created = client.put(
+            "/api/v2/targets/3-6/manual/YY.S01",
+            json={"target_level": 3, "target_version": "current-manual-v1"},
+        )
+    assert targets.json()["items"] == []
+    assert created.json()["target_version"] == "current-manual-v1"
+    assert (v2_catalog()["goals"], v2_catalog()["capabilities"], v2_catalog()["skills"]) == (3, 10, 38)
+
+
 def test_missing_configs_and_skills_return_404():
     with TestClient(app) as client:
         assert client.get("/api/v2/scoring-rubrics/999999").status_code == 404

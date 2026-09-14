@@ -116,6 +116,7 @@ def _initialize_v2(connection):
             encoding="utf-8"
         )
     )
+    _rebuild_generated_prerelease_v2(connection)
     connection.executescript("""
     CREATE TABLE IF NOT EXISTS rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, source TEXT NOT NULL, scoring_version TEXT NOT NULL DEFAULT 'anchor_interp_v1', is_simulated_test_data INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS education_goals_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT NOT NULL, name TEXT NOT NULL, UNIQUE(rubric_id, code));
@@ -239,11 +240,55 @@ def _initialize_v2(connection):
             )
 
 
+def _rebuild_generated_prerelease_v2(connection):
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scoring_configs_v2'"
+    ).fetchone()
+    if not row:
+        return
+    table_sql = " ".join(row[0].split())
+    capability_sql = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'capabilities_v2'"
+    ).fetchone()[0]
+    needs_rebuild = "skill_code TEXT NOT NULL" not in table_sql or "code TEXT UNIQUE" in capability_sql
+    if not needs_rebuild:
+        return
+    rubric_rows = connection.execute(
+        "SELECT count(*), coalesce(sum(is_simulated_test_data = 0), 0) FROM rubric_versions_v2"
+    ).fetchone()
+    config_non_simulated = connection.execute(
+        "SELECT coalesce(sum(is_simulated_test_data = 0), 0) FROM scoring_configs_v2"
+    ).fetchone()[0]
+    if rubric_rows[0] > 1 or rubric_rows[1] or config_non_simulated:
+        raise RuntimeError("pre-release V2 schema contains non-generated data")
+    connection.executescript(
+        """
+        DROP TABLE IF EXISTS indicator_anchors_v2;
+        DROP TABLE IF EXISTS indicators_v2;
+        DROP TABLE IF EXISTS indicator_groups_v2;
+        DROP TABLE IF EXISTS target_policies_v2;
+        DROP TABLE IF EXISTS levels_v2;
+        DROP TABLE IF EXISTS scoring_configs_v2;
+        DROP TABLE IF EXISTS skills_v2;
+        DROP TABLE IF EXISTS capabilities_v2;
+        DROP TABLE IF EXISTS education_goals_v2;
+        DROP TABLE IF EXISTS rubric_versions_v2;
+        """
+    )
+
+
 def v2_catalog():
     with connect() as connection:
+        rubric = connection.execute(
+            "SELECT id, code, source, scoring_version, is_simulated_test_data FROM rubric_versions_v2 WHERE code = 'kai_feng_yuyang_260910'"
+        ).fetchone()
+        if not rubric:
+            return None
+        rubric_id = rubric[0]
         goals = []
         for goal_id, code, name in connection.execute(
-            "SELECT id, code, name FROM education_goals_v2 ORDER BY code"
+            "SELECT id, code, name FROM education_goals_v2 WHERE rubric_id = ? ORDER BY code",
+            (rubric_id,),
         ):
             capabilities = []
             for cap_id, cap_code, cap_name in connection.execute(
@@ -269,11 +314,23 @@ def v2_catalog():
                 for goal in goals
                 for capability in goal["capabilities"]
             ),
-            "levels": connection.execute("SELECT count(*) FROM levels_v2").fetchone()[
-                0
-            ],
+            "rubric_version": rubric[1],
+            "source": rubric[2],
+            "scoring_version": rubric[3],
+            "is_simulated_test_data": bool(rubric[4]),
+            "school_target_policy": json.loads(
+                (Path(__file__).parent / "data" / "kai_feng_yuyang_260910.json").read_text(encoding="utf-8")
+            )["school_target_policy"],
+            "levels": connection.execute(
+                "SELECT count(*) FROM levels_v2 l JOIN skills_v2 s ON s.id = l.skill_id WHERE s.rubric_id = ?",
+                (rubric_id,),
+            ).fetchone()[0],
             "indicators": connection.execute(
-                "SELECT count(*) FROM indicators_v2"
+                """SELECT count(*) FROM indicators_v2 i
+                JOIN indicator_groups_v2 g ON g.id = i.group_id
+                JOIN scoring_configs_v2 c ON c.id = g.config_id
+                WHERE c.rubric_id = ?""",
+                (rubric_id,),
             ).fetchone()[0],
             "hierarchy": goals,
             "legacy_mapping": {"status": "legacy_unscored"},

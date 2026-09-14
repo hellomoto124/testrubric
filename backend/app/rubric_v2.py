@@ -273,17 +273,22 @@ def publish_config(config_id):
 
 
 def list_targets(grade=None, term=None, skill_code=None):
-    clauses = []
-    params = []
+    clauses = ["rubric_id = ?"]
     for column, value in (("grade", grade), ("term", term), ("skill_code", skill_code)):
         if value is not None:
             clauses.append(f"{column} = ?")
-            params.append(value)
     query = "SELECT skill_code, grade, term, target_version, target_level, basic, mastery, excellent FROM target_policies_v2"
-    if clauses:
-        query += " WHERE " + " AND ".join(clauses)
+    query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY skill_code, grade, term, target_version"
     with connect() as connection:
+        params = [
+            _current_rubric_id(connection),
+            *[
+                value
+                for _column, value in (("grade", grade), ("term", term), ("skill_code", skill_code))
+                if value is not None
+            ],
+        ]
         items = [
             dict(zip(("skill_code", "grade", "term", "target_version", "target_level", "basic", "mastery", "excellent"), row))
             for row in connection.execute(query, params)
@@ -305,12 +310,21 @@ def create_target(grade, term, skill_code, target_level, target_version):
             (rubric_id, skill_code),
         ).fetchone()
         try:
-            connection.execute(
+            target_id = connection.execute(
                 """INSERT INTO target_policies_v2
                 (rubric_id, skill_code, grade, term, target_version, target_level, basic, mastery, excellent)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (rubric_id, skill_code, grade, term, target_version, target_level, *default),
-            )
+            ).lastrowid
         except sqlite3.IntegrityError as exc:
             raise V2Conflict("target version already exists") from exc
-    return list_targets(grade, term, skill_code)["items"][-1]
+        row = connection.execute(
+            "SELECT skill_code, grade, term, target_version, target_level, basic, mastery, excellent FROM target_policies_v2 WHERE id = ?",
+            (target_id,),
+        ).fetchone()
+        return dict(
+            zip(
+                ("skill_code", "grade", "term", "target_version", "target_level", "basic", "mastery", "excellent"),
+                row,
+            )
+        )

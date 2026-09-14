@@ -100,6 +100,13 @@ def test_reinitialize_preserves_second_rubric_and_manual_target():
         ).fetchone() == (4,)
 
 
+def test_current_catalog_excludes_other_rubric_versions():
+    initialize_v2()
+    insert_second_rubric()
+    catalog = v2_catalog()
+    assert (catalog["goals"], catalog["capabilities"], catalog["skills"], catalog["levels"]) == (3, 10, 38, 228)
+
+
 def test_all_38_demo_configs_are_published_uncalibrated_and_simulated():
     initialize_v2()
     with connect() as connection:
@@ -132,3 +139,35 @@ def test_school_name_and_local_target_policy_are_explicit():
         assert connection.execute(
             "SELECT count(*) FROM target_policies_v2 WHERE grade = '3-6' AND target_level = 3 AND basic = 2 AND mastery = 3 AND excellent = 4 AND target_version = 'yy-grade3-6-default-v1'"
         ).fetchone()[0] == 38
+
+
+def test_generated_prerelease_schema_is_rebuilt_once():
+    with connect() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE, source TEXT, scoring_version TEXT, is_simulated_test_data INTEGER);
+            CREATE TABLE capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, goal_id INTEGER, code TEXT UNIQUE, name TEXT, description TEXT);
+            CREATE TABLE scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, code TEXT UNIQUE, status TEXT, calibration_status TEXT, is_simulated_test_data INTEGER);
+            INSERT INTO rubric_versions_v2 VALUES (1, 'old-generated', 'old', 'anchor_interp_v1', 1);
+            INSERT INTO scoring_configs_v2 VALUES (1, 1, 'YY.S01.demo', 'published', 'uncalibrated', 1);
+            """
+        )
+    initialize_v2()
+    assert v2_catalog()["skills"] == 38
+
+
+def test_prerelease_schema_with_non_generated_data_is_not_deleted():
+    with connect() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE, source TEXT, scoring_version TEXT, is_simulated_test_data INTEGER);
+            CREATE TABLE capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, goal_id INTEGER, code TEXT UNIQUE, name TEXT, description TEXT);
+            CREATE TABLE scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER, code TEXT UNIQUE, status TEXT, calibration_status TEXT, is_simulated_test_data INTEGER);
+            INSERT INTO rubric_versions_v2 VALUES (1, 'manual-version', 'manual', 'anchor_interp_v1', 0);
+            INSERT INTO scoring_configs_v2 VALUES (1, 1, 'manual', 'draft', 'uncalibrated', 0);
+            """
+        )
+    with pytest.raises(RuntimeError, match="non-generated data"):
+        initialize_v2()
+    with connect() as connection:
+        assert connection.execute("SELECT code FROM rubric_versions_v2").fetchone() == ("manual-version",)
