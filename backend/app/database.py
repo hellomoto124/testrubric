@@ -128,21 +128,6 @@ def _initialize_v2(connection):
     CREATE TABLE IF NOT EXISTS indicator_anchors_v2 (id INTEGER PRIMARY KEY, indicator_id INTEGER NOT NULL REFERENCES indicators_v2(id), score INTEGER NOT NULL, text TEXT NOT NULL, UNIQUE(indicator_id, score));
     CREATE TABLE IF NOT EXISTS target_policies_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), skill_code TEXT NOT NULL, grade TEXT NOT NULL, term TEXT NOT NULL, target_version TEXT NOT NULL DEFAULT 'v1', target_level INTEGER NOT NULL, basic INTEGER NOT NULL DEFAULT 2, mastery INTEGER NOT NULL DEFAULT 3, excellent INTEGER NOT NULL DEFAULT 4, UNIQUE(rubric_id, skill_code, grade, term, target_version));
     """)
-    for table, column in (
-        (
-            "rubric_versions_v2",
-            "scoring_version TEXT NOT NULL DEFAULT 'anchor_interp_v1'",
-        ),
-        ("skills_v2", "subskill TEXT NOT NULL DEFAULT ''"),
-        ("target_policies_v2", "target_version TEXT NOT NULL DEFAULT 'v1'"),
-        ("target_policies_v2", "basic INTEGER NOT NULL DEFAULT 2"),
-        ("target_policies_v2", "mastery INTEGER NOT NULL DEFAULT 3"),
-        ("target_policies_v2", "excellent INTEGER NOT NULL DEFAULT 4"),
-    ):
-        try:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
-        except sqlite3.OperationalError:
-            pass
     connection.execute(
         "INSERT OR IGNORE INTO rubric_versions_v2 (code, source, is_simulated_test_data) VALUES (?, ?, 1)",
         (data["rubric_version"], "kai_feng_yuyang_260910.json"),
@@ -195,8 +180,8 @@ def _initialize_v2(connection):
                 (rubric_id, skill["code"] + ".demo"),
             )
             config_id = connection.execute(
-                "SELECT id FROM scoring_configs_v2 WHERE code = ?",
-                (skill["code"] + ".demo",),
+                "SELECT id FROM scoring_configs_v2 WHERE rubric_id = ? AND code = ?",
+                (rubric_id, skill["code"] + ".demo"),
             ).fetchone()[0]
             for level in skill["levels"]:
                 connection.execute(
@@ -213,7 +198,7 @@ def _initialize_v2(connection):
                     (config_id, skill["code"], level["level"], group_code),
                 )
                 group_id = connection.execute(
-                    "SELECT id FROM indicator_groups_v2 WHERE code = ?", (group_code,)
+                    "SELECT id FROM indicator_groups_v2 WHERE config_id = ? AND code = ?", (config_id, group_code)
                 ).fetchone()[0]
                 for index, descriptor in enumerate(level["descriptors"], 1):
                     code = f"{group_code}.I{index:02}"
@@ -222,7 +207,7 @@ def _initialize_v2(connection):
                         (group_id, code, descriptor, 1 / len(level["descriptors"])),
                     )
                     indicator_id = connection.execute(
-                        "SELECT id FROM indicators_v2 WHERE code = ?", (code,)
+                        "SELECT id FROM indicators_v2 WHERE group_id = ? AND code = ?", (group_id, code)
                     ).fetchone()[0]
                     anchors = [
                         "有展示机会但未表现",
