@@ -547,6 +547,9 @@ def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
     from app import worker
 
     calls = []
+    monkeypatch.setattr(
+        worker, "recover_running_jobs_v2", lambda: calls.append("recover-v2")
+    )
     monkeypatch.setattr(worker, "recover_running_jobs", lambda: calls.append("recover"))
     monkeypatch.setattr(
         worker, "process_one_job", lambda: calls.append("job") or {"id": 1}
@@ -555,7 +558,7 @@ def test_run_worker_recovers_once_and_checks_stop_after_a_job(monkeypatch):
 
     worker.run_worker(lambda: next(states), poll_interval=0)
 
-    assert calls == ["recover", "job"]
+    assert calls == ["recover-v2", "recover", "job"]
 
 
 def test_real_deepagents_graph_completes_with_scripted_model_without_host_tools(

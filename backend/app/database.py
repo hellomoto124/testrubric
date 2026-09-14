@@ -128,10 +128,13 @@ def _initialize_v2(connection):
     CREATE TABLE IF NOT EXISTS indicators_v2 (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES indicator_groups_v2(id), code TEXT NOT NULL, source_text TEXT NOT NULL, weight REAL NOT NULL, UNIQUE(group_id, code));
     CREATE TABLE IF NOT EXISTS indicator_anchors_v2 (id INTEGER PRIMARY KEY, indicator_id INTEGER NOT NULL REFERENCES indicators_v2(id), score INTEGER NOT NULL, text TEXT NOT NULL, UNIQUE(indicator_id, score));
     CREATE TABLE IF NOT EXISTS target_policies_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), skill_code TEXT NOT NULL, grade TEXT NOT NULL, term TEXT NOT NULL, target_version TEXT NOT NULL DEFAULT 'v1', target_level INTEGER NOT NULL, basic INTEGER NOT NULL DEFAULT 2, mastery INTEGER NOT NULL DEFAULT 3, excellent INTEGER NOT NULL DEFAULT 4, UNIQUE(rubric_id, skill_code, grade, term, target_version));
-    CREATE TABLE IF NOT EXISTS assessment_jobs_v2 (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id), skill_code TEXT NOT NULL, evidence_refs TEXT NOT NULL, config_snapshot TEXT NOT NULL, target_snapshot TEXT, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS assessment_jobs_v2 (id INTEGER PRIMARY KEY, student_id INTEGER NOT NULL REFERENCES students(id), skill_code TEXT NOT NULL, evidence_refs TEXT NOT NULL, config_snapshot TEXT NOT NULL, target_snapshot TEXT NOT NULL, rubric_code TEXT NOT NULL, context TEXT NOT NULL, support_level TEXT NOT NULL, period TEXT NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS assessment_results_v2 (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES assessment_jobs_v2(id), revision INTEGER NOT NULL, result TEXT NOT NULL, engine TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(job_id, revision));
+    CREATE TABLE IF NOT EXISTS assessment_judgments_v2 (id INTEGER PRIMARY KEY, result_id INTEGER NOT NULL REFERENCES assessment_results_v2(id), indicator_id INTEGER NOT NULL, state TEXT NOT NULL, ordinal_score INTEGER, evidence_refs TEXT NOT NULL, fragment_locator TEXT NOT NULL, reason TEXT NOT NULL, support_context TEXT NOT NULL, UNIQUE(result_id, indicator_id));
+    CREATE TABLE IF NOT EXISTS assessment_revisions_v2 (id INTEGER PRIMARY KEY, original_result_id INTEGER NOT NULL REFERENCES assessment_results_v2(id), revised_result_id INTEGER NOT NULL REFERENCES assessment_results_v2(id), reason TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS job_events_v2 (id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES assessment_jobs_v2(id), stage TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     """)
+    _upgrade_v2_job_columns(connection)
     connection.execute(
         "INSERT OR IGNORE INTO rubric_versions_v2 (code, source, is_simulated_test_data) VALUES (?, ?, 1)",
         (data["rubric_version"], "kai_feng_yuyang_260910.json"),
@@ -240,6 +243,23 @@ def _initialize_v2(connection):
                     target["mastery"],
                     target["excellent"],
                 ),
+            )
+
+
+def _upgrade_v2_job_columns(connection):
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(assessment_jobs_v2)")
+    }
+    additions = {
+        "rubric_code": "TEXT NOT NULL DEFAULT 'kai_feng_yuyang_260910'",
+        "context": "TEXT NOT NULL DEFAULT '未说明'",
+        "support_level": "TEXT NOT NULL DEFAULT '未说明'",
+        "period": "TEXT NOT NULL DEFAULT 'default'",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE assessment_jobs_v2 ADD COLUMN {name} {definition}"
             )
 
 
@@ -1077,49 +1097,320 @@ def record_event(job_id: int, stage: str, detail: str) -> None:
         )
 
 
-def create_v2_job(student_id: int, skill_code: str, evidence_refs: list[int], config: dict, idempotency_key: str) -> dict:
+def create_v2_job(
+    student_id: int,
+    skill_code: str,
+    evidence_refs: list[int],
+    config: dict,
+    context: str,
+    support_level: str,
+    period: str,
+    idempotency_key: str,
+) -> dict:
     with connect() as connection:
-        existing = connection.execute("SELECT id FROM assessment_jobs_v2 WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+        existing = connection.execute(
+            "SELECT id FROM assessment_jobs_v2 WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
         if existing:
             return get_v2_job(existing[0])
         marks = ",".join("?" for _ in evidence_refs)
-        if not evidence_refs or not connection.execute("SELECT 1 FROM students WHERE id = ?", (student_id,)).fetchone() or connection.execute("SELECT count(*) FROM evidence WHERE student_id = ? AND id IN (" + marks + ")", [student_id] + evidence_refs).fetchone()[0] != len(set(evidence_refs)):
+        valid_refs = evidence_refs and connection.execute(
+            "SELECT count(*) FROM evidence WHERE student_id = ? AND id IN ("
+            + marks
+            + ")",
+            [student_id, *evidence_refs],
+        ).fetchone()[0] == len(set(evidence_refs))
+        if (
+            not connection.execute(
+                "SELECT 1 FROM students WHERE id = ?", (student_id,)
+            ).fetchone()
+            or not valid_refs
+        ):
             raise ValueError("evidence refs do not exist for student")
+        target = connection.execute(
+            """SELECT skill_code, grade, term, target_version, target_level,
+            basic, mastery, excellent FROM target_policies_v2
+            WHERE rubric_id = ? AND skill_code = ? AND term IN (?, 'default')
+            ORDER BY (term = ?) DESC, id DESC LIMIT 1""",
+            (config["rubric_id"], skill_code, period, period),
+        ).fetchone()
+        if not target:
+            raise ValueError("target does not exist")
+        target_snapshot = dict(
+            zip(
+                (
+                    "skill_code",
+                    "grade",
+                    "term",
+                    "target_version",
+                    "target_level",
+                    "basic",
+                    "mastery",
+                    "excellent",
+                ),
+                target,
+            )
+        )
+        rubric_code = connection.execute(
+            "SELECT code FROM rubric_versions_v2 WHERE id = ?", (config["rubric_id"],)
+        ).fetchone()[0]
         job_id = connection.execute(
-            "INSERT INTO assessment_jobs_v2 (student_id, skill_code, evidence_refs, config_snapshot, idempotency_key) VALUES (?, ?, ?, ?, ?)",
-            (student_id, skill_code, json.dumps(evidence_refs), json.dumps(config, ensure_ascii=False), idempotency_key),
+            """INSERT INTO assessment_jobs_v2
+            (student_id, skill_code, evidence_refs, config_snapshot, target_snapshot,
+             rubric_code, context, support_level, period, idempotency_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                student_id,
+                skill_code,
+                json.dumps(evidence_refs),
+                json.dumps(config, ensure_ascii=False),
+                json.dumps(target_snapshot, ensure_ascii=False),
+                rubric_code,
+                context,
+                support_level,
+                period,
+                idempotency_key,
+            ),
         ).lastrowid
-        connection.execute("INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'queued', 'created')", (job_id,))
+        connection.execute(
+            "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'queued', 'created')",
+            (job_id,),
+        )
     return get_v2_job(job_id)
 
 
 def get_v2_job(job_id: int) -> dict | None:
+    fields = (
+        "id",
+        "student_id",
+        "skill_code",
+        "evidence_refs",
+        "config_snapshot",
+        "target_snapshot",
+        "rubric_code",
+        "context",
+        "support_level",
+        "period",
+        "status",
+        "attempts",
+        "error",
+    )
     with connect() as connection:
-        row = connection.execute("SELECT id, student_id, skill_code, evidence_refs, config_snapshot, status, attempts, error FROM assessment_jobs_v2 WHERE id = ?", (job_id,)).fetchone()
+        row = connection.execute(
+            "SELECT " + ",".join(fields) + " FROM assessment_jobs_v2 WHERE id = ?",
+            (job_id,),
+        ).fetchone()
         if not row:
             return None
-        results = [dict(json.loads(item), id=result_id, revision=revision, engine=engine) for result_id, revision, item, engine in connection.execute("SELECT id, revision, result, engine FROM assessment_results_v2 WHERE job_id = ? ORDER BY revision", (job_id,))]
-        events = [dict(zip(("id", "stage", "detail"), item)) for item in connection.execute("SELECT id, stage, detail FROM job_events_v2 WHERE job_id = ? ORDER BY id", (job_id,))]
-    job = dict(zip(("id", "student_id", "skill_code", "evidence_refs", "config_snapshot", "status", "attempts", "error"), row))
-    job["evidence_refs"] = json.loads(job["evidence_refs"])
-    job["config_snapshot"] = json.loads(job["config_snapshot"])
+        results = [
+            dict(json.loads(payload), id=result_id, revision=revision, engine=engine)
+            for result_id, revision, payload, engine in connection.execute(
+                "SELECT id, revision, result, engine FROM assessment_results_v2 WHERE job_id = ? ORDER BY revision",
+                (job_id,),
+            )
+        ]
+        events = [
+            dict(zip(("id", "stage", "detail"), item))
+            for item in connection.execute(
+                "SELECT id, stage, detail FROM job_events_v2 WHERE job_id = ? ORDER BY id",
+                (job_id,),
+            )
+        ]
+    job = dict(zip(fields, row))
+    for field in ("evidence_refs", "config_snapshot", "target_snapshot"):
+        job[field] = json.loads(job[field])
     job["scoring_version"] = "anchor_interp_v1"
-    job["results"], job["events"] = results, events
+    job["results"] = results
+    job["result"] = results[-1] if results else None
+    job["revisions"] = results[1:]
+    job["events"] = events
     return job
 
 
-def append_v2_revision(job_id: int, result: dict, engine: str) -> dict:
+def record_v2_event(job_id: int, stage: str, detail: str) -> None:
     with connect() as connection:
-        if not connection.execute("SELECT 1 FROM assessment_jobs_v2 WHERE id = ?", (job_id,)).fetchone():
+        connection.execute(
+            "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, ?, ?)",
+            (job_id, stage, detail),
+        )
+
+
+def claim_next_v2_job() -> dict | None:
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT id FROM assessment_jobs_v2 WHERE status = 'queued' ORDER BY id LIMIT 1"
+        ).fetchone()
+        if not row:
+            return None
+        changed = connection.execute(
+            """UPDATE assessment_jobs_v2 SET status = 'running', attempts = attempts + 1,
+            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'""",
+            row,
+        )
+        if not changed.rowcount:
+            return None
+        connection.execute(
+            "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'running', 'claimed')",
+            row,
+        )
+    return get_v2_job(row[0])
+
+
+def fail_v2_job(job_id: int, error: str) -> None:
+    with connect() as connection:
+        attempts = connection.execute(
+            "SELECT attempts FROM assessment_jobs_v2 WHERE id = ?", (job_id,)
+        ).fetchone()[0]
+        status = "failed" if attempts >= 3 else "queued"
+        connection.execute(
+            """UPDATE assessment_jobs_v2 SET status = ?, error = ?,
+            updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (status, error, job_id),
+        )
+        connection.execute(
+            "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, ?, ?)",
+            (job_id, status, error),
+        )
+
+
+def recover_running_jobs_v2() -> int:
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT id FROM assessment_jobs_v2 WHERE status = 'running'"
+        ).fetchall()
+        for (job_id,) in rows:
+            connection.execute(
+                """UPDATE assessment_jobs_v2 SET status = 'queued',
+                error = 'worker restart recovery' WHERE id = ?""",
+                (job_id,),
+            )
+            connection.execute(
+                "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'queued', 'worker restart recovery')",
+                (job_id,),
+            )
+    return len(rows)
+
+
+def v2_task_context(job_id: int) -> dict:
+    job = get_v2_job(job_id)
+    if not job:
+        raise ValueError("job does not exist")
+    with connect() as connection:
+        marks = ",".join("?" for _ in job["evidence_refs"])
+        rows = connection.execute(
+            "SELECT id, evidence_type, text, filename, media_type FROM evidence WHERE id IN ("
+            + marks
+            + ") ORDER BY id",
+            job["evidence_refs"],
+        ).fetchall()
+    evidence = [
+        dict(zip(("id", "evidence_type", "text", "filename", "media_type"), row))
+        for row in rows
+    ]
+    return {"job": job, "evidence": evidence, "scoring_rubric": job["config_snapshot"]}
+
+
+def append_v2_result(job_id: int, result: dict, engine: str) -> dict:
+    with connect() as connection:
+        if not connection.execute(
+            "SELECT 1 FROM assessment_jobs_v2 WHERE id = ?", (job_id,)
+        ).fetchone():
             raise ValueError("job does not exist")
-        revision = connection.execute("SELECT count(*) FROM assessment_results_v2 WHERE job_id = ?", (job_id,)).fetchone()[0] + 1
-        connection.execute("INSERT INTO assessment_results_v2 (job_id, revision, result, engine) VALUES (?, ?, ?, ?)", (job_id, revision, json.dumps(result, ensure_ascii=False), engine))
-        connection.execute("UPDATE assessment_jobs_v2 SET status = 'succeeded', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
-        connection.execute("INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'succeeded', ?)", (job_id, engine))
+        revision = connection.execute(
+            "SELECT count(*) + 1 FROM assessment_results_v2 WHERE job_id = ?", (job_id,)
+        ).fetchone()[0]
+        result_id = connection.execute(
+            "INSERT INTO assessment_results_v2 (job_id, revision, result, engine) VALUES (?, ?, ?, ?)",
+            (job_id, revision, json.dumps(result, ensure_ascii=False), engine),
+        ).lastrowid
+        for judgment in result.get("judgments", []):
+            connection.execute(
+                """INSERT INTO assessment_judgments_v2
+                (result_id, indicator_id, state, ordinal_score, evidence_refs,
+                 fragment_locator, reason, support_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    result_id,
+                    judgment["indicator_id"],
+                    judgment["observation_state"],
+                    judgment["ordinal_score"],
+                    json.dumps(judgment["evidence_refs"]),
+                    judgment["fragment_locator"],
+                    judgment["reason"],
+                    judgment["support_context"],
+                ),
+            )
+        connection.execute(
+            "UPDATE assessment_jobs_v2 SET status = 'succeeded', error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (job_id,),
+        )
+        connection.execute(
+            "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'succeeded', ?)",
+            (job_id, engine),
+        )
     return get_v2_job(job_id)
+
+
+def append_v2_revision(result_id: int, result: dict, reason: str) -> dict:
+    with connect() as connection:
+        original = connection.execute(
+            "SELECT job_id FROM assessment_results_v2 WHERE id = ?", (result_id,)
+        ).fetchone()
+        if not original:
+            raise ValueError("assessment result does not exist")
+    job = append_v2_result(original[0], result, "manual_revision")
+    revised = job["result"]
+    with connect() as connection:
+        connection.execute(
+            "INSERT INTO assessment_revisions_v2 (original_result_id, revised_result_id, reason) VALUES (?, ?, ?)",
+            (result_id, revised["id"], reason),
+        )
+    return revised | {"supersedes_result_id": result_id, "reason": reason}
 
 
 def v2_history(student_id: int, skill_code: str) -> dict:
     with connect() as connection:
-        rows = connection.execute("SELECT r.revision, r.result, r.engine, r.created_at FROM assessment_results_v2 r JOIN assessment_jobs_v2 j ON j.id = r.job_id WHERE j.student_id = ? AND j.skill_code = ? ORDER BY r.id", (student_id, skill_code)).fetchall()
-    return {"student_id": student_id, "skill_code": skill_code, "items": [dict(json.loads(result), revision=revision, engine=engine, created_at=created_at) for revision, result, engine, created_at in rows]}
+        jobs = connection.execute(
+            """SELECT id, rubric_code, config_snapshot, created_at
+            FROM assessment_jobs_v2 WHERE student_id = ? AND skill_code = ?
+            AND status = 'succeeded' ORDER BY id""",
+            (student_id, skill_code),
+        ).fetchall()
+        items = []
+        for job_id, rubric_code, config_snapshot, created_at in jobs:
+            results = [
+                dict(json.loads(payload), id=result_id, revision=revision, engine=engine)
+                for result_id, revision, payload, engine in connection.execute(
+                    "SELECT id, revision, result, engine FROM assessment_results_v2 WHERE job_id = ? ORDER BY revision",
+                    (job_id,),
+                )
+            ]
+            if not results:
+                continue
+            config = json.loads(config_snapshot)
+            items.append(
+                {
+                    "job_id": job_id,
+                    "rubric_code": rubric_code,
+                    "scoring_config_version": config["version"],
+                    "created_at": created_at,
+                    "result": results[-1],
+                    "revisions": results[1:],
+                }
+            )
+    comparable = []
+    if items:
+        latest_key = (items[-1]["rubric_code"], items[-1]["scoring_config_version"])
+        comparable = [
+            item
+            for item in items
+            if (item["rubric_code"], item["scoring_config_version"]) == latest_key
+        ]
+    return {
+        "student_id": student_id,
+        "skill_code": skill_code,
+        "items": comparable,
+        "excluded_incomparable_count": len(items) - len(comparable),
+    }

@@ -106,10 +106,26 @@ def publish_v2(config_id: int):
 @app.post("/api/v2/assessment-jobs", status_code=201)
 async def create_assessment_job_v2(request: Request) -> dict:
     payload = await request.json()
-    if set(payload) != {"student_id", "skill_code", "evidence_refs", "idempotency_key"} or not isinstance(payload["idempotency_key"], str) or not payload["idempotency_key"]:
-        raise HTTPException(422, "student_id, skill_code, evidence_refs, idempotency_key are required")
+    required = {"student_id", "skill_code", "evidence_refs", "idempotency_key"}
+    allowed = required | {"context", "support_level", "period"}
+    if (
+        not required <= set(payload)
+        or not set(payload) <= allowed
+        or not isinstance(payload["idempotency_key"], str)
+        or not payload["idempotency_key"].strip()
+    ):
+        raise HTTPException(422, "only V2 assessment job fields are allowed")
     try:
-        return create_v2_job(payload["student_id"], payload["skill_code"], payload["evidence_refs"], get_published_config(payload["skill_code"]), payload["idempotency_key"])
+        return create_v2_job(
+            payload["student_id"],
+            payload["skill_code"],
+            payload["evidence_refs"],
+            get_published_config(payload["skill_code"]),
+            payload.get("context", "未说明"),
+            payload.get("support_level", "未说明"),
+            payload.get("period", "default"),
+            payload["idempotency_key"],
+        )
     except (ValueError, V2NotFound) as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -122,16 +138,71 @@ def get_assessment_job_v2(job_id: int) -> dict:
     return job
 
 
-@app.post("/api/v2/assessments/{job_id}/revisions", status_code=201)
-async def revise_assessment_v2(job_id: int, request: Request) -> dict:
+@app.get("/api/v2/assessment-jobs/{job_id}/events")
+async def assessment_events_v2(job_id: int):
+    if not get_v2_job(job_id):
+        raise HTTPException(404, "job does not exist")
+
+    async def stream():
+        last = None
+        while True:
+            current = get_v2_job(job_id)
+            state = (current["status"], len(current["events"]))
+            if state != last:
+                yield (
+                    "event: status\ndata: "
+                    + json.dumps(
+                        {"status": current["status"], "events": current["events"]},
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                last = state
+            if current["status"] in {"succeeded", "failed"}:
+                return
+            import asyncio
+
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.post("/api/v2/assessments/{result_id}/revisions", status_code=201)
+async def revise_assessment_v2(result_id: int, request: Request) -> dict:
     payload = await request.json()
     if set(payload) != {"judgments", "reason"} or not isinstance(payload["judgments"], list) or not isinstance(payload["reason"], str) or not payload["reason"].strip():
         raise HTTPException(422, "judgments and reason are required")
-    job = get_v2_job(job_id)
-    if not job:
-        raise HTTPException(404, "job does not exist")
-    result = score_v2(job["config_snapshot"], payload["judgments"]) | {"judgments": payload["judgments"], "reason": payload["reason"]}
-    return append_v2_revision(job_id, result, "manual_revision")
+    from .database import connect
+
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT job_id, result FROM assessment_results_v2 WHERE id = ?",
+            (result_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "assessment result does not exist")
+    job = get_v2_job(row[0])
+    original = json.loads(row[1])
+    original_ids = {item["indicator_id"] for item in original.get("judgments", [])}
+    revised_ids = {item.get("indicator_id") for item in payload["judgments"]}
+    if revised_ids != original_ids or len(revised_ids) != len(payload["judgments"]):
+        raise HTTPException(422, "revisions must contain exactly the original indicators")
+    try:
+        result = score_v2(
+            job["config_snapshot"],
+            payload["judgments"],
+            job["target_snapshot"]["target_level"],
+            set(job["evidence_refs"]),
+        ) | {
+            "judgments": payload["judgments"],
+            "feedback": original.get("feedback", "教师已完成人工复核。"),
+            "rubric_code": job["rubric_code"],
+            "scoring_config_version": job["config_snapshot"]["version"],
+            "target_version": job["target_snapshot"]["target_version"],
+        }
+        return append_v2_revision(result_id, result, payload["reason"])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/v2/students/{student_id}/skills/{skill_code}/history")
