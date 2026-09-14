@@ -178,3 +178,15 @@ def test_a17_deterministic():
 def test_a18_higher_complete_after_lower_gap_needs_review():
     data = judgments({1: [3, 0, 0], 2: [4, 4, 4]})
     assert anchor_interp_v1(config(), data)["score_state"] == "needs_review"
+
+
+def test_a19_unrelated_is_bounded_without_score():
+    data = judgments(complete_to(1, (3, 0, 0)))
+    data["L2I3"] = {"state": "unrelated"}
+    assert anchor_interp_v1(config(), data)["score_state"] == "bounded"
+
+
+def test_a20_unknown_lower_higher_complete_is_not_conflict():
+    data = judgments({1: [4, 4, 4], 2: [4, 4, 4]})
+    data["L1I1"] = {"state": "unknown"}
+    assert anchor_interp_v1(config(), data)["score_state"] == "bounded"

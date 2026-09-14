@@ -37,7 +37,7 @@ def _score(config, judgments, unknown):
         for indicator_id, weight in _items(level):
             judgment = judgments.get(indicator_id, {"state": "unknown"})
             state = judgment["state"]
-            value = unknown if state == "unknown" else Decimal(str(judgment["score"]))
+            value = unknown if state in {"unknown", "unrelated"} else Decimal(str(judgment["score"]))
             if (
                 state not in {"observed", "unknown", "unrelated"}
                 or value < 0
@@ -90,9 +90,10 @@ def anchor_interp_v1(config, judgments, target_level=None):
     for level in config:
         values = [judgments.get(indicator_id, {"state": "unknown"}) for indicator_id, _weight in _items(level)]
         complete = all(item.get("state") == "observed" and item.get("score") == 4 for item in values)
+        explicit_gap = any(item.get("state") == "observed" and item.get("score") < 4 for item in values)
         if incomplete_seen and complete:
             return base | {"score_state": "needs_review", "attained_level": None, "target_status": "needs_review"}
-        incomplete_seen = incomplete_seen or not complete
+        incomplete_seen = incomplete_seen or explicit_gap
     if not any(state == "observed" for state in states):
         return base | {
             "score_state": "insufficient_evidence",
@@ -101,7 +102,7 @@ def anchor_interp_v1(config, judgments, target_level=None):
         }
     low_l, low_p, low = _score(config, judgments, Decimal(0))
     _high_l, _high_p, high = _score(config, judgments, Decimal(4))
-    bounded = "unknown" in states
+    bounded = any(state in {"unknown", "unrelated"} for state in states)
     target = Decimal(target_level * 100) if target_level else None
     if target is None:
         target_status, gap = "not_configured", None
