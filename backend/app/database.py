@@ -116,17 +116,15 @@ def _initialize_v2(connection):
             encoding="utf-8"
         )
     )
-    if connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='skills_v2'").fetchone():
-        connection.executescript("DROP TABLE IF EXISTS indicator_anchors_v2; DROP TABLE IF EXISTS indicators_v2; DROP TABLE IF EXISTS indicator_groups_v2; DROP TABLE IF EXISTS scoring_configs_v2; DROP TABLE IF EXISTS target_policies_v2; DROP TABLE IF EXISTS levels_v2; DROP TABLE IF EXISTS skills_v2; DROP TABLE IF EXISTS capabilities_v2; DROP TABLE IF EXISTS education_goals_v2; DROP TABLE IF EXISTS rubric_versions_v2;")
     connection.executescript("""
     CREATE TABLE IF NOT EXISTS rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, source TEXT NOT NULL, scoring_version TEXT NOT NULL DEFAULT 'anchor_interp_v1', is_simulated_test_data INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS education_goals_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT NOT NULL, name TEXT NOT NULL, UNIQUE(rubric_id, code));
-    CREATE TABLE IF NOT EXISTS capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), goal_id INTEGER NOT NULL REFERENCES education_goals_v2(id), code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), goal_id INTEGER NOT NULL REFERENCES education_goals_v2(id), code TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, UNIQUE(rubric_id, code));
     CREATE TABLE IF NOT EXISTS skills_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), capability_id INTEGER NOT NULL REFERENCES capabilities_v2(id), code TEXT NOT NULL, subskill TEXT NOT NULL, name_cn TEXT NOT NULL, name_en TEXT NOT NULL, source TEXT NOT NULL, excel_row INTEGER NOT NULL, UNIQUE(rubric_id, code));
     CREATE TABLE IF NOT EXISTS levels_v2 (id INTEGER PRIMARY KEY, skill_id INTEGER NOT NULL REFERENCES skills_v2(id), level INTEGER NOT NULL, descriptors TEXT NOT NULL, UNIQUE(skill_id, level));
-    CREATE TABLE IF NOT EXISTS scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT UNIQUE NOT NULL, status TEXT NOT NULL, calibration_status TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS indicator_groups_v2 (id INTEGER PRIMARY KEY, config_id INTEGER NOT NULL REFERENCES scoring_configs_v2(id), skill_code TEXT NOT NULL, level INTEGER NOT NULL, code TEXT UNIQUE NOT NULL);
-    CREATE TABLE IF NOT EXISTS indicators_v2 (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES indicator_groups_v2(id), code TEXT UNIQUE NOT NULL, source_text TEXT NOT NULL, weight REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT NOT NULL, status TEXT NOT NULL, calibration_status TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL, UNIQUE(rubric_id, code));
+    CREATE TABLE IF NOT EXISTS indicator_groups_v2 (id INTEGER PRIMARY KEY, config_id INTEGER NOT NULL REFERENCES scoring_configs_v2(id), skill_code TEXT NOT NULL, level INTEGER NOT NULL, code TEXT NOT NULL, UNIQUE(config_id, code));
+    CREATE TABLE IF NOT EXISTS indicators_v2 (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES indicator_groups_v2(id), code TEXT NOT NULL, source_text TEXT NOT NULL, weight REAL NOT NULL, UNIQUE(group_id, code));
     CREATE TABLE IF NOT EXISTS indicator_anchors_v2 (id INTEGER PRIMARY KEY, indicator_id INTEGER NOT NULL REFERENCES indicators_v2(id), score INTEGER NOT NULL, text TEXT NOT NULL, UNIQUE(indicator_id, score));
     CREATE TABLE IF NOT EXISTS target_policies_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), skill_code TEXT NOT NULL, grade TEXT NOT NULL, term TEXT NOT NULL, target_version TEXT NOT NULL DEFAULT 'v1', target_level INTEGER NOT NULL, basic INTEGER NOT NULL DEFAULT 2, mastery INTEGER NOT NULL DEFAULT 3, excellent INTEGER NOT NULL DEFAULT 4, UNIQUE(rubric_id, skill_code, grade, term, target_version));
     """)
