@@ -221,9 +221,21 @@ def _initialize_v2(connection):
                             "INSERT OR IGNORE INTO indicator_anchors_v2 (indicator_id, score, text) VALUES (?, ?, ?)",
                             (indicator_id, score, f"{text}：{descriptor}"),
                         )
+            target = data["school_target_policy"]
             connection.execute(
-                "INSERT OR IGNORE INTO target_policies_v2 (rubric_id, skill_code, grade, term, target_level) VALUES (?, ?, '3-6', 'default', 3)",
-                (rubric_id, skill["code"]),
+                """INSERT OR IGNORE INTO target_policies_v2
+                (rubric_id, skill_code, grade, term, target_version, target_level, basic, mastery, excellent)
+                VALUES (?, ?, ?, 'default', ?, ?, ?, ?, ?)""",
+                (
+                    rubric_id,
+                    skill["code"],
+                    target["grade_band"],
+                    target["target_version"],
+                    target["default_target"],
+                    target["basic"],
+                    target["mastery"],
+                    target["excellent"],
+                ),
             )
 
 
