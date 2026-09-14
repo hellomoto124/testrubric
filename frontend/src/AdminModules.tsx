@@ -36,7 +36,7 @@ export function RubricSystem({ rubric }: { rubric: any }) {
   };
   useEffect(() => { if (skills.length) void load(); }, [skillCode, skills.length]);
   const saveTarget = async () => {
-    try { await write("PUT", `/api/v2/targets/3-6/ui/${skillCode}`, { target_level: targetLevel, target_version: `ui-${Date.now()}` }); setMessage("新目标版本已保存，仅影响后续比较。"); await load(); } catch (reason) { setError(String(reason)); }
+    try { await write("PUT", `/api/v2/targets/3-6/default/${skillCode}`, { target_level: targetLevel, target_version: `ui-${Date.now()}` }); setMessage("新目标版本已保存；后续看板比较和新任务将使用该版本。"); await load(); } catch (reason) { setError(String(reason)); }
   };
   const createDraft = async () => {
     try { const draft = await write("POST", "/api/v2/scoring-rubrics/drafts", { skill_code: skillCode }); setMessage(`已创建评分配置 V${draft.version} 草稿。`); await load(); } catch (reason) { setError(String(reason)); }

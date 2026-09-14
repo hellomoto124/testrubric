@@ -89,3 +89,43 @@ def test_demo_system_settings_are_persisted_and_reject_secret_fields():
         "default_grade": "三年级",
     }
     assert rejected.status_code == 422
+
+
+def test_new_default_target_flows_to_dashboard_and_new_job_snapshot():
+    with TestClient(app) as client:
+        target = client.put(
+            "/api/v2/targets/3-6/default/YY.S01",
+            json={"target_level": 5, "target_version": "admin-default-v2"},
+        )
+        dashboard = client.get(
+            "/api/v2/dashboard/school/1", params={"skill_code": "YY.S01"}
+        )
+        evidence = client.post(
+            "/api/evidence",
+            json={
+                "student_id": 1,
+                "evidence_type": "teacher_observation",
+                "text": "模拟测试数据：用于目标快照验证。",
+            },
+        ).json()
+        job = client.post(
+            "/api/v2/assessment-jobs",
+            json={
+                "student_id": 1,
+                "skill_code": "YY.S01",
+                "evidence_refs": [evidence["id"]],
+                "context": "目标版本测试",
+                "support_level": "无",
+                "period": "default",
+                "idempotency_key": "admin-target-snapshot",
+            },
+        )
+
+    assert target.status_code == 201
+    skill = dashboard.json()["goals"][0]["capabilities"][0]["skills"][0]
+    assert (skill["target_level"], skill["target_version"]) == (
+        5,
+        "admin-default-v2",
+    )
+    assert job.json()["target_snapshot"]["target_level"] == 5
+    assert job.json()["target_snapshot"]["target_version"] == "admin-default-v2"
