@@ -20,6 +20,18 @@ from .database import (
 )
 from .database import create_evidence as save_evidence
 from .database import current_rubric as load_current_rubric
+from .rubric_v2 import (
+    V2Conflict,
+    V2Invalid,
+    V2NotFound,
+    create_draft,
+    create_target,
+    get_config,
+    get_published_config,
+    list_targets,
+    publish_config,
+    update_config,
+)
 
 RUBRIC = json.loads(
     (Path(__file__).parent / "data" / "future_9.json").read_text(encoding="utf-8")
@@ -49,31 +61,25 @@ def current_rubric_v2() -> dict:
     return v2_catalog()
 
 
+def v2_result(operation):
+    try:
+        return operation()
+    except V2NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except V2Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except V2Invalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/v2/skills/{code}/scoring-rubric")
 def scoring_rubric_v2(code: str) -> dict:
-    from .database import connect
+    return v2_result(lambda: get_published_config(code))
 
-    with connect() as c:
-        row = c.execute(
-            "SELECT id FROM scoring_configs_v2 WHERE code = ? AND status = 'published'",
-            (code + ".demo",),
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, "published scoring rubric not found")
-        groups = []
-        for group_id, level, group_code in c.execute(
-            "SELECT id, level, code FROM indicator_groups_v2 WHERE config_id = ? ORDER BY level",
-            row,
-        ):
-            indicators = [
-                dict(zip(("id", "weight"), item))
-                for item in c.execute(
-                    "SELECT code, weight FROM indicators_v2 WHERE group_id = ?",
-                    (group_id,),
-                )
-            ]
-            groups.append({"id": group_code, "level": level, "indicators": indicators})
-    return {"code": code, "groups": groups}
+
+@app.get("/api/v2/scoring-rubrics/{config_id}")
+def scoring_rubric_detail_v2(config_id: int) -> dict:
+    return v2_result(lambda: get_config(config_id))
 
 
 @app.post("/api/v2/scoring-rubrics/drafts", status_code=201)
@@ -81,38 +87,39 @@ async def create_scoring_draft(request: Request) -> dict:
     payload = await request.json()
     if set(payload) != {"skill_code"}:
         raise HTTPException(422, "only skill_code is allowed")
-    from .database import connect
+    return v2_result(lambda: create_draft(payload["skill_code"]))
 
-    with connect() as c:
-        row = c.execute(
-            "SELECT rubric_id FROM scoring_configs_v2 WHERE code=? AND status='published'",
-            (payload["skill_code"] + ".demo",),
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, "published rubric not found")
-        config_id = c.execute(
-            "INSERT INTO scoring_configs_v2 (rubric_id,code,status,calibration_status,is_simulated_test_data) VALUES (?,?,'draft','uncalibrated',1)",
-            (row[0], payload["skill_code"] + ".draft"),
-        ).lastrowid
-    return {"id": config_id, "status": "draft"}
+
+@app.patch("/api/v2/scoring-rubrics/{config_id}")
+async def update_scoring_rubric_v2(config_id: int, request: Request) -> dict:
+    payload = await request.json()
+    return v2_result(lambda: update_config(config_id, payload))
 
 
 @app.post("/api/v2/scoring-rubrics/{config_id}/publish")
 def publish_v2(config_id: int):
-    from .database import connect
+    return v2_result(lambda: publish_config(config_id))
 
-    with connect() as c:
-        status = c.execute(
-            "SELECT status FROM scoring_configs_v2 WHERE id=?", (config_id,)
-        ).fetchone()
-        if not status:
-            raise HTTPException(404, "config not found")
-        if status[0] != "reviewed":
-            raise HTTPException(409, "config must be reviewed")
-        c.execute(
-            "UPDATE scoring_configs_v2 SET status='published' WHERE id=?", (config_id,)
+
+@app.get("/api/v2/targets")
+def targets_v2(grade: str | None = None, term: str | None = None, skill_code: str | None = None):
+    return list_targets(grade, term, skill_code)
+
+
+@app.put("/api/v2/targets/{grade}/{term}/{skill_code}", status_code=201)
+async def create_target_v2(grade: str, term: str, skill_code: str, request: Request):
+    payload = await request.json()
+    if set(payload) != {"target_level", "target_version"}:
+        raise HTTPException(422, "target_level and target_version are required")
+    return v2_result(
+        lambda: create_target(
+            grade,
+            term,
+            skill_code,
+            payload["target_level"],
+            payload["target_version"],
         )
-    return {"id": config_id, "status": "published"}
+    )
 
 
 @app.get("/api/dashboard/school")

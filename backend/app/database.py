@@ -122,8 +122,8 @@ def _initialize_v2(connection):
     CREATE TABLE IF NOT EXISTS capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), goal_id INTEGER NOT NULL REFERENCES education_goals_v2(id), code TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL, UNIQUE(rubric_id, code));
     CREATE TABLE IF NOT EXISTS skills_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), capability_id INTEGER NOT NULL REFERENCES capabilities_v2(id), code TEXT NOT NULL, subskill TEXT NOT NULL, name_cn TEXT NOT NULL, name_en TEXT NOT NULL, source TEXT NOT NULL, excel_row INTEGER NOT NULL, UNIQUE(rubric_id, code));
     CREATE TABLE IF NOT EXISTS levels_v2 (id INTEGER PRIMARY KEY, skill_id INTEGER NOT NULL REFERENCES skills_v2(id), level INTEGER NOT NULL, descriptors TEXT NOT NULL, UNIQUE(skill_id, level));
-    CREATE TABLE IF NOT EXISTS scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT NOT NULL, status TEXT NOT NULL, calibration_status TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL, UNIQUE(rubric_id, code));
-    CREATE TABLE IF NOT EXISTS indicator_groups_v2 (id INTEGER PRIMARY KEY, config_id INTEGER NOT NULL REFERENCES scoring_configs_v2(id), skill_code TEXT NOT NULL, level INTEGER NOT NULL, code TEXT NOT NULL, UNIQUE(config_id, code));
+    CREATE TABLE IF NOT EXISTS scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), skill_code TEXT NOT NULL, code TEXT NOT NULL, version INTEGER NOT NULL, parent_config_id INTEGER REFERENCES scoring_configs_v2(id), status TEXT NOT NULL, calibration_status TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL, UNIQUE(rubric_id, skill_code, version), UNIQUE(rubric_id, code));
+    CREATE TABLE IF NOT EXISTS indicator_groups_v2 (id INTEGER PRIMARY KEY, config_id INTEGER NOT NULL REFERENCES scoring_configs_v2(id), skill_code TEXT NOT NULL, level INTEGER NOT NULL, code TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1, UNIQUE(config_id, code));
     CREATE TABLE IF NOT EXISTS indicators_v2 (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES indicator_groups_v2(id), code TEXT NOT NULL, source_text TEXT NOT NULL, weight REAL NOT NULL, UNIQUE(group_id, code));
     CREATE TABLE IF NOT EXISTS indicator_anchors_v2 (id INTEGER PRIMARY KEY, indicator_id INTEGER NOT NULL REFERENCES indicators_v2(id), score INTEGER NOT NULL, text TEXT NOT NULL, UNIQUE(indicator_id, score));
     CREATE TABLE IF NOT EXISTS target_policies_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), skill_code TEXT NOT NULL, grade TEXT NOT NULL, term TEXT NOT NULL, target_version TEXT NOT NULL DEFAULT 'v1', target_level INTEGER NOT NULL, basic INTEGER NOT NULL DEFAULT 2, mastery INTEGER NOT NULL DEFAULT 3, excellent INTEGER NOT NULL DEFAULT 4, UNIQUE(rubric_id, skill_code, grade, term, target_version));
@@ -176,8 +176,8 @@ def _initialize_v2(connection):
                 "SELECT id FROM skills_v2 WHERE rubric_id = ? AND code = ?", (rubric_id, skill["code"])
             ).fetchone()[0]
             connection.execute(
-                "INSERT OR IGNORE INTO scoring_configs_v2 (rubric_id, code, status, calibration_status, is_simulated_test_data) VALUES (?, ?, 'published', 'uncalibrated', 1)",
-                (rubric_id, skill["code"] + ".demo"),
+            "INSERT OR IGNORE INTO scoring_configs_v2 (rubric_id, skill_code, code, version, parent_config_id, status, calibration_status, is_simulated_test_data) VALUES (?, ?, ?, 1, NULL, 'published', 'uncalibrated', 1)",
+            (rubric_id, skill["code"], skill["code"] + ".demo"),
             )
             config_id = connection.execute(
                 "SELECT id FROM scoring_configs_v2 WHERE rubric_id = ? AND code = ?",

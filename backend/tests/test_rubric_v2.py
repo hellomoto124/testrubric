@@ -28,7 +28,7 @@ def insert_second_rubric():
             (rubric_id, capability_id),
         )
         config_id = connection.execute(
-            "INSERT INTO scoring_configs_v2 (rubric_id, code, status, calibration_status, is_simulated_test_data) VALUES (?, 'YY.S01.demo', 'published', 'uncalibrated', 1)",
+            "INSERT INTO scoring_configs_v2 (rubric_id, skill_code, code, version, status, calibration_status, is_simulated_test_data) VALUES (?, 'YY.S01', 'YY.S01.demo', 1, 'published', 'uncalibrated', 1)",
             (rubric_id,),
         ).lastrowid
         group_id = connection.execute(
