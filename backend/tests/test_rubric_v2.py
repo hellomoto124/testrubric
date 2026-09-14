@@ -11,3 +11,6 @@ def test_v2_migration_is_idempotent_and_keeps_legacy_rows(monkeypatch, tmp_path)
     assert (catalog["goals"], catalog["capabilities"], catalog["skills"], catalog["levels"]) == (3, 10, 38, 228)
     assert catalog["indicators"] >= 228
     assert catalog["legacy_mapping"]["status"] == "legacy_unscored"
+    assert len(catalog["hierarchy"]) == 3
+    assert sum(len(goal["capabilities"]) for goal in catalog["hierarchy"]) == 10
+    assert sum(len(capability["skills"]) for goal in catalog["hierarchy"] for capability in goal["capabilities"]) == 38
