@@ -244,6 +244,7 @@ def _initialize_v2(connection):
                     target["excellent"],
                 ),
             )
+    _seed_v2_demo_results(connection, rubric_id)
 
 
 def _upgrade_v2_job_columns(connection):
@@ -260,6 +261,198 @@ def _upgrade_v2_job_columns(connection):
         if name not in columns:
             connection.execute(
                 f"ALTER TABLE assessment_jobs_v2 ADD COLUMN {name} {definition}"
+            )
+
+
+def _seed_v2_config(connection, config_id):
+    row = connection.execute(
+        """SELECT id, rubric_id, skill_code, code, version, status,
+        calibration_status, is_simulated_test_data
+        FROM scoring_configs_v2 WHERE id = ?""",
+        (config_id,),
+    ).fetchone()
+    config = dict(
+        zip(
+            (
+                "id",
+                "rubric_id",
+                "skill_code",
+                "code",
+                "version",
+                "status",
+                "calibration_status",
+                "is_simulated_test_data",
+            ),
+            row,
+        )
+    )
+    config["groups"] = []
+    for group_id, level, group_code, group_weight in connection.execute(
+        "SELECT id, level, code, weight FROM indicator_groups_v2 WHERE config_id = ? ORDER BY level, id",
+        (config_id,),
+    ):
+        indicators = [
+            {
+                "database_id": indicator_id,
+                "id": code,
+                "source_text": text,
+                "weight": weight,
+            }
+            for indicator_id, code, text, weight in connection.execute(
+                "SELECT id, code, source_text, weight FROM indicators_v2 WHERE group_id = ? ORDER BY id",
+                (group_id,),
+            )
+        ]
+        config["groups"].append(
+            {
+                "database_id": group_id,
+                "id": group_code,
+                "level": level,
+                "weight": group_weight,
+                "indicators": indicators,
+            }
+        )
+    return config
+
+
+def _seed_v2_demo_results(connection, rubric_id):
+    from .assessment_v2 import score
+
+    rubric_code = connection.execute(
+        "SELECT code FROM rubric_versions_v2 WHERE id = ?", (rubric_id,)
+    ).fetchone()[0]
+    skills = connection.execute(
+        "SELECT code FROM skills_v2 WHERE rubric_id = ? ORDER BY code LIMIT 12",
+        (rubric_id,),
+    ).fetchall()
+    students = [row[0] for row in connection.execute("SELECT id FROM students ORDER BY id")]
+    for skill_index, (skill_code,) in enumerate(skills):
+        config_id = connection.execute(
+            """SELECT id FROM scoring_configs_v2 WHERE rubric_id = ? AND skill_code = ?
+            AND status = 'published' ORDER BY version DESC LIMIT 1""",
+            (rubric_id, skill_code),
+        ).fetchone()[0]
+        config = _seed_v2_config(connection, config_id)
+        target_row = connection.execute(
+            """SELECT skill_code, grade, term, target_version, target_level,
+            basic, mastery, excellent FROM target_policies_v2
+            WHERE rubric_id = ? AND skill_code = ? AND term = 'default'""",
+            (rubric_id, skill_code),
+        ).fetchone()
+        target = dict(
+            zip(
+                (
+                    "skill_code",
+                    "grade",
+                    "term",
+                    "target_version",
+                    "target_level",
+                    "basic",
+                    "mastery",
+                    "excellent",
+                ),
+                target_row,
+            )
+        )
+        selected_students = students if skill_index < 6 else students[:18]
+        for student_id in selected_students:
+            key = f"seed-v2-{student_id}-{skill_code}"
+            existing = connection.execute(
+                "SELECT id FROM assessment_jobs_v2 WHERE idempotency_key = ?", (key,)
+            ).fetchone()
+            if existing:
+                continue
+            evidence_ref = connection.execute(
+                "SELECT id FROM evidence WHERE student_id = ? ORDER BY id LIMIT 1",
+                (student_id,),
+            ).fetchone()[0]
+            pattern = (student_id + skill_index) % 7
+            judgments = []
+            for group in config["groups"]:
+                for indicator in group["indicators"]:
+                    if pattern == 4:
+                        state, ordinal = "unknown", None
+                    elif pattern == 5:
+                        state, ordinal = (
+                            ("conflict", None)
+                            if not judgments
+                            else ("unknown", None)
+                        )
+                    elif pattern == 3 and group["level"] == 3:
+                        state, ordinal = "unknown", None
+                    else:
+                        state = "observed"
+                        ordinal = (
+                            4
+                            if pattern == 6
+                            or pattern in {0, 2} and group["level"] <= 3
+                            or pattern in {1, 3} and group["level"] == 1
+                            or pattern == 3 and group["level"] == 2
+                            else 2
+                            if pattern == 0 and group["level"] == 4
+                            or pattern == 1 and group["level"] == 2
+                            else 0
+                        )
+                    judgments.append(
+                        {
+                            "indicator_id": indicator["database_id"],
+                            "observation_state": state,
+                            "ordinal_score": ordinal,
+                            "evidence_refs": [evidence_ref],
+                            "fragment_locator": "模拟测试数据",
+                            "reason": "代表性连续评分样本",
+                            "support_context": "模拟课堂情境",
+                        }
+                    )
+            result = score(config, judgments, target["target_level"], {evidence_ref}) | {
+                "judgments": judgments,
+                "feedback": "模拟测试数据：用于界面与算法验证，不作正式成绩。",
+                "rubric_code": rubric_code,
+                "scoring_config_version": config["version"],
+                "target_version": target["target_version"],
+                "model_run_id": key,
+            }
+            job_id = connection.execute(
+                """INSERT INTO assessment_jobs_v2
+                (student_id, skill_code, evidence_refs, config_snapshot, target_snapshot,
+                 rubric_code, context, support_level, period, idempotency_key,
+                 status, attempts)
+                VALUES (?, ?, ?, ?, ?, ?, '模拟课堂', '模拟支持', 'default', ?, 'succeeded', 1)""",
+                (
+                    student_id,
+                    skill_code,
+                    json.dumps([evidence_ref]),
+                    json.dumps(config, ensure_ascii=False),
+                    json.dumps(target, ensure_ascii=False),
+                    rubric_code,
+                    key,
+                ),
+            ).lastrowid
+            result_id = connection.execute(
+                """INSERT INTO assessment_results_v2 (job_id, revision, result, engine)
+                VALUES (?, 1, ?, 'seed_demo_v2')""",
+                (job_id, json.dumps(result, ensure_ascii=False)),
+            ).lastrowid
+            for judgment in judgments:
+                connection.execute(
+                    """INSERT INTO assessment_judgments_v2
+                    (result_id, indicator_id, state, ordinal_score, evidence_refs,
+                     fragment_locator, reason, support_context)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        result_id,
+                        judgment["indicator_id"],
+                        judgment["observation_state"],
+                        judgment["ordinal_score"],
+                        json.dumps(judgment["evidence_refs"]),
+                        judgment["fragment_locator"],
+                        judgment["reason"],
+                        judgment["support_context"],
+                    ),
+                )
+            connection.execute(
+                "INSERT INTO job_events_v2 (job_id, stage, detail) VALUES (?, 'succeeded', 'seed_demo_v2')",
+                (job_id,),
             )
 
 

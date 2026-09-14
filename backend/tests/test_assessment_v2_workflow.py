@@ -117,8 +117,8 @@ def test_v2_revision_uses_result_id_and_history_excludes_revision_as_growth():
     assert revised.status_code == 201, revised.text
     assert revised.json()["revision"] == 2
     assert revised.json()["supersedes_result_id"] == result["id"]
-    assert len(history.json()["items"]) == 1
-    assert len(history.json()["items"][0]["revisions"]) == 1
+    assert len(history.json()["items"]) == 2
+    assert sum(len(item["revisions"]) for item in history.json()["items"]) == 1
 
 
 def test_v2_job_row_contains_no_model_controlled_score_fields():

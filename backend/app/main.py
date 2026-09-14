@@ -210,6 +210,16 @@ def assessment_history_v2(student_id: int, skill_code: str) -> dict:
     return v2_history(student_id, skill_code)
 
 
+@app.get("/api/v2/dashboard/{scope}/{subject_id}")
+def dashboard_v2(scope: str, subject_id: int) -> dict:
+    from .dashboard_v2 import dashboard
+
+    result = dashboard(scope, subject_id)
+    if not result:
+        raise HTTPException(404, "dashboard scope or subject does not exist")
+    return result
+
+
 @app.get("/api/v2/targets")
 def targets_v2(grade: str | None = None, term: str | None = None, skill_code: str | None = None):
     return list_targets(grade, term, skill_code)
