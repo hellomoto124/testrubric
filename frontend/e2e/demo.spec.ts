@@ -10,8 +10,8 @@ const fileEvidence = "模拟测试数据：TXT 学生作品证据。";
 test("V2 evidence to SSE scoring refreshes personal and school views", async ({ page }) => {
   await page.goto("/");
   const roles = page.getByRole("navigation", { name: "角色切换" });
-  await expect(page.getByRole("heading", { name: "学校素养地图" })).toBeVisible();
-  await expect(page.getByText("3 个育人目标 → 10 项素养能力 → 38 项技能")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "凯风雨旸素养发展总览" })).toBeVisible();
+  await expect(page.getByText("基于学校三大育人目标 · 10 项核心能力 · 38 项素养技能")).toBeVisible();
 
   await roles.getByRole("button", { name: "学生", exact: true }).click();
   await expect(page.getByLabel("模拟学生").getByRole("option")).toHaveCount(20);
@@ -51,7 +51,7 @@ test("375, 768 and 1440 widths do not horizontally overflow", async ({ page }) =
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "学校素养地图" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "凯风雨旸素养发展总览" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.getByRole("navigation", { name: "角色切换" }).getByRole("button", { name: "教师", exact: true }).click();
     await expect(page.getByRole("heading", { name: "教师工作台" })).toBeVisible();

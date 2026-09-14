@@ -74,6 +74,27 @@ def test_v2_dashboard_unknown_scope_or_subject_is_404():
         assert client.get("/api/v2/dashboard/student/999").status_code == 404
 
 
+def test_school_dashboard_can_return_student_rows_for_one_selected_skill():
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v2/dashboard/school/1", params={"skill_code": "YY.S01"}
+        )
+
+    assert response.status_code == 200
+    rows = response.json()["student_rows"]
+    assert len(rows) == 20
+    assert rows[0]["anonymous_id"] == "模拟学生01"
+    assert rows[0]["class_name"] == "模拟测试班级1"
+    assert rows[0]["result"]["score_state"] in {
+        "exact",
+        "bounded",
+        "insufficient_evidence",
+        "needs_review",
+    }
+    assert "judgments" not in rows[0]["result"]
+    assert "rank" not in str(rows)
+
+
 def test_v2_seed_is_idempotent_and_live_result_wins_without_deleting_seed():
     from app.database import connect
     from app.worker import process_one_job

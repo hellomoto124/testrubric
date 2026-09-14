@@ -10,7 +10,7 @@ const goals = [
   { code: "YY.G03", name: "拥有良好习惯的学习者", median_level: null, coverage: 0, capabilities: [{ code: "YY.C03", name: "学会学习", skills: [] }] },
 ];
 const context = { classes: [{ id: 1, name: "模拟测试班级1" }], students: [{ id: 1, class_id: 1, anonymous_id: "模拟学生01" }, { id: 2, class_id: 1, anonymous_id: "模拟学生02" }] };
-const dashboard = { scope: { type: "school", id: 1 }, subject: { id: 1, name: "凯风雨旸小学（模拟测试数据）" }, student_count: 20, rubric_code: "kai_feng_yuyang_260910", scoring_version: "anchor_interp_v1", goals };
+const dashboard = { scope: { type: "school", id: 1 }, subject: { id: 1, name: "凯风雨旸小学（模拟测试数据）" }, student_count: 20, rubric_code: "kai_feng_yuyang_260910", scoring_version: "anchor_interp_v1", goals, student_rows: [{ id: 1, anonymous_id: "模拟学生01", class_name: "模拟测试班级1", result: skill.result }] };
 
 function mockApi() {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -35,11 +35,20 @@ describe("凯风雨旸小学 V2 UI", () => {
   test("loads V2 rubric and dashboard with simulation boundary", async () => {
     const fetchMock = mockApi();
     render(<App />);
-    expect(screen.getByText(/模拟测试数据/)).toBeInTheDocument();
+    expect(screen.getAllByText(/模拟测试数据/).length).toBeGreaterThan(0);
     expect(screen.getByText(/角色切换不是认证/)).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "学校素养地图" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "凯风雨旸素养发展总览" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/v2/rubrics/current");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v2/dashboard/school/1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v2/dashboard/school/1?skill_code=YY.S01");
+  });
+
+  test("uses the left navigation and student detail table layout", async () => {
+    mockApi();
+    render(<App />);
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "凯风雨旸素养发展总览" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "模拟学生01" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "学生技能表现" })).toHaveTextContent("模拟学生01");
   });
 
   test("renders three goals and chart text alternative", async () => {

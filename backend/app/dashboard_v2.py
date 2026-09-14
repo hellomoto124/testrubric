@@ -104,7 +104,7 @@ def _summarize(items, eligible_count):
     }
 
 
-def dashboard(scope: str, subject_id: int):
+def dashboard(scope: str, subject_id: int, selected_skill_code: str | None = None):
     with connect() as connection:
         subject, student_ids = _scope(connection, scope, subject_id)
         if not subject:
@@ -179,7 +179,47 @@ def dashboard(scope: str, subject_id: int):
                     **_summarize(goal_items, len(student_ids) * skill_count),
                 }
             )
-    return {
+        student_rows = []
+        if scope == "school" and selected_skill_code:
+            row_fields = {
+                "score_state",
+                "attained_level",
+                "score_display",
+                "score_lower",
+                "score_upper",
+                "target_status",
+                "target_gap",
+                "feedback",
+                "engine",
+                "job_id",
+                "revision",
+            }
+            student_rows = [
+                {
+                    "id": student_id,
+                    "anonymous_id": anonymous_id,
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "result": (
+                        {
+                            key: value
+                            for key, value in results[
+                                (student_id, selected_skill_code)
+                            ].items()
+                            if key in row_fields
+                        }
+                        if (student_id, selected_skill_code) in results
+                        else None
+                    ),
+                }
+                for student_id, anonymous_id, class_id, class_name in connection.execute(
+                    """SELECT s.id, s.anonymous_id, c.id, c.name
+                    FROM students s JOIN classes c ON c.id = s.class_id
+                    WHERE c.school_id = ? ORDER BY s.id""",
+                    (subject_id,),
+                )
+            ]
+    payload = {
         "data_notice": DEMO_NOTICE,
         "scope": {"type": scope, "id": subject_id},
         "subject": subject,
@@ -188,3 +228,7 @@ def dashboard(scope: str, subject_id: int):
         "scoring_version": rubric[2],
         "goals": goals,
     }
+    if scope == "school" and selected_skill_code:
+        payload["student_rows"] = student_rows
+        payload["selected_skill_code"] = selected_skill_code
+    return payload

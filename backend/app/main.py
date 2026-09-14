@@ -211,10 +211,10 @@ def assessment_history_v2(student_id: int, skill_code: str) -> dict:
 
 
 @app.get("/api/v2/dashboard/{scope}/{subject_id}")
-def dashboard_v2(scope: str, subject_id: int) -> dict:
+def dashboard_v2(scope: str, subject_id: int, skill_code: str | None = None) -> dict:
     from .dashboard_v2 import dashboard
 
-    result = dashboard(scope, subject_id)
+    result = dashboard(scope, subject_id, skill_code)
     if not result:
         raise HTTPException(404, "dashboard scope or subject does not exist")
     return result
