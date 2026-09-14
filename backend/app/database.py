@@ -73,6 +73,54 @@ def initialize(rubric: dict) -> None:
                         [(skill_id, level["level"], json.dumps(level["descriptors"], ensure_ascii=False)) for level in skill["levels"]],
                     )
         _seed_demo_assessments(connection, rubric["rubric_version"])
+        _initialize_v2(connection)
+
+
+def _initialize_v2(connection):
+    data = json.loads((Path(__file__).parent / "data" / "kai_feng_yuyang_260910.json").read_text(encoding="utf-8"))
+    connection.executescript("""
+    CREATE TABLE IF NOT EXISTS rubric_versions_v2 (id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, source TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS education_goals_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT UNIQUE NOT NULL, name TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS capabilities_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), goal_id INTEGER NOT NULL REFERENCES education_goals_v2(id), code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS skills_v2 (id INTEGER PRIMARY KEY, capability_id INTEGER NOT NULL REFERENCES capabilities_v2(id), code TEXT UNIQUE NOT NULL, name_cn TEXT NOT NULL, name_en TEXT NOT NULL, source TEXT NOT NULL, excel_row INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS levels_v2 (id INTEGER PRIMARY KEY, skill_id INTEGER NOT NULL REFERENCES skills_v2(id), level INTEGER NOT NULL, descriptors TEXT NOT NULL, UNIQUE(skill_id, level));
+    CREATE TABLE IF NOT EXISTS scoring_configs_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), code TEXT UNIQUE NOT NULL, status TEXT NOT NULL, calibration_status TEXT NOT NULL, is_simulated_test_data INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS indicator_groups_v2 (id INTEGER PRIMARY KEY, config_id INTEGER NOT NULL REFERENCES scoring_configs_v2(id), skill_code TEXT NOT NULL, level INTEGER NOT NULL, code TEXT UNIQUE NOT NULL);
+    CREATE TABLE IF NOT EXISTS indicators_v2 (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES indicator_groups_v2(id), code TEXT UNIQUE NOT NULL, source_text TEXT NOT NULL, weight REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS indicator_anchors_v2 (id INTEGER PRIMARY KEY, indicator_id INTEGER NOT NULL REFERENCES indicators_v2(id), score INTEGER NOT NULL, text TEXT NOT NULL, UNIQUE(indicator_id, score));
+    CREATE TABLE IF NOT EXISTS target_policies_v2 (id INTEGER PRIMARY KEY, rubric_id INTEGER NOT NULL REFERENCES rubric_versions_v2(id), skill_code TEXT NOT NULL, grade TEXT NOT NULL, term TEXT NOT NULL, target_level INTEGER NOT NULL, UNIQUE(rubric_id, skill_code, grade, term));
+    """)
+    connection.execute("INSERT OR IGNORE INTO rubric_versions_v2 (code, source, is_simulated_test_data) VALUES (?, ?, 1)", (data["rubric_version"], "kai_feng_yuyang_260910.json"))
+    rubric_id = connection.execute("SELECT id FROM rubric_versions_v2 WHERE code = ?", (data["rubric_version"],)).fetchone()[0]
+    goals = {}
+    for goal in data["goals"]:
+        connection.execute("INSERT OR IGNORE INTO education_goals_v2 (rubric_id, code, name) VALUES (?, ?, ?)", (rubric_id, goal["code"], goal["name"]))
+        goals[goal["name"]] = connection.execute("SELECT id FROM education_goals_v2 WHERE code = ?", (goal["code"],)).fetchone()[0]
+    for capability in data["capabilities"]:
+        connection.execute("INSERT OR IGNORE INTO capabilities_v2 (rubric_id, goal_id, code, name, description) VALUES (?, ?, ?, ?, ?)", (rubric_id, goals[capability["goal"]], capability["code"], capability["name"], capability["description"]))
+        cap_id = connection.execute("SELECT id FROM capabilities_v2 WHERE code = ?", (capability["code"],)).fetchone()[0]
+        for skill in capability["skills"]:
+            connection.execute("INSERT OR IGNORE INTO skills_v2 (capability_id, code, name_cn, name_en, source, excel_row) VALUES (?, ?, ?, ?, ?, ?)", (cap_id, skill["code"], skill["name_cn"], skill["name_en"], skill["source"], skill["excel_row"]))
+            skill_id = connection.execute("SELECT id FROM skills_v2 WHERE code = ?", (skill["code"],)).fetchone()[0]
+            connection.execute("INSERT OR IGNORE INTO scoring_configs_v2 (rubric_id, code, status, calibration_status, is_simulated_test_data) VALUES (?, ?, 'published', 'uncalibrated', 1)", (rubric_id, skill["code"] + ".demo"))
+            config_id = connection.execute("SELECT id FROM scoring_configs_v2 WHERE code = ?", (skill["code"] + ".demo",)).fetchone()[0]
+            for level in skill["levels"]:
+                connection.execute("INSERT OR IGNORE INTO levels_v2 (skill_id, level, descriptors) VALUES (?, ?, ?)", (skill_id, level["level"], json.dumps(level["descriptors"], ensure_ascii=False)))
+                group_code = f"{skill['code']}.L{level['level']}"
+                connection.execute("INSERT OR IGNORE INTO indicator_groups_v2 (config_id, skill_code, level, code) VALUES (?, ?, ?, ?)", (config_id, skill["code"], level["level"], group_code))
+                group_id = connection.execute("SELECT id FROM indicator_groups_v2 WHERE code = ?", (group_code,)).fetchone()[0]
+                for index, descriptor in enumerate(level["descriptors"], 1):
+                    code = f"{group_code}.I{index:02}"
+                    connection.execute("INSERT OR IGNORE INTO indicators_v2 (group_id, code, source_text, weight) VALUES (?, ?, ?, ?)", (group_id, code, descriptor, 1 / len(level["descriptors"])))
+                    indicator_id = connection.execute("SELECT id FROM indicators_v2 WHERE code = ?", (code,)).fetchone()[0]
+                    for score in range(5):
+                        connection.execute("INSERT OR IGNORE INTO indicator_anchors_v2 (indicator_id, score, text) VALUES (?, ?, ?)", (indicator_id, score, f"{score}/4：{descriptor}"))
+            connection.execute("INSERT OR IGNORE INTO target_policies_v2 (rubric_id, skill_code, grade, term, target_level) VALUES (?, ?, '3-6', 'default', 3)", (rubric_id, skill["code"]))
+
+
+def v2_catalog():
+    with connect() as connection:
+        return {"goals": connection.execute("SELECT count(*) FROM education_goals_v2").fetchone()[0], "capabilities": connection.execute("SELECT count(*) FROM capabilities_v2").fetchone()[0], "skills": connection.execute("SELECT count(*) FROM skills_v2").fetchone()[0], "levels": connection.execute("SELECT count(*) FROM levels_v2").fetchone()[0], "indicators": connection.execute("SELECT count(*) FROM indicators_v2").fetchone()[0], "legacy_mapping": {"status": "legacy_unscored"}}
 
 
 def _seed_demo_assessments(connection, rubric_version: str) -> None:
