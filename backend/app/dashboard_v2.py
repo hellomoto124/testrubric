@@ -146,6 +146,7 @@ def dashboard(scope: str, subject_id: int):
                         "name_en": name_en,
                         "subskill": subskill,
                         "target_level": target[0],
+                        "target_score": target[0] * 100,
                         "basic_level": target[1],
                         "mastery_level": target[2],
                         "excellent_level": target[3],

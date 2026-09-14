@@ -56,12 +56,14 @@ def test_v2_dashboards_preserve_goal_capability_skill_hierarchy_without_totals()
         "code",
         "name",
         "target_level",
+        "target_score",
         "median_level",
         "coverage",
         "target_status_counts",
         "score_points",
         "score_intervals",
     }
+    assert first_skill["target_score"] == first_skill["target_level"] * 100
     assert all(0 <= value <= 600 for value in first_skill["score_points"])
     assert all(item["lower"] <= item["upper"] for item in first_skill["score_intervals"])
 
