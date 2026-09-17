@@ -122,7 +122,7 @@ def test_v2_revision_uses_result_id_and_history_excludes_revision_as_growth():
     assert revised.status_code == 201, revised.text
     assert revised.json()["revision"] == 2
     assert revised.json()["supersedes_result_id"] == result["id"]
-    assert len(history.json()["items"]) == 2
+    assert len(history.json()["items"]) == 3
     assert sum(len(item["revisions"]) for item in history.json()["items"]) == 1
 
 

@@ -237,6 +237,39 @@ def report_audit_v2(limit: int = 30) -> dict:
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.get('/api/v2/competency-board')
+def competency_board_v2(class_id: int | None = None, name: str = '', stage: str = 'latest'):
+    from .competency_board import board
+    try:
+        return board(class_id, name, stage)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/api/v2/students/{student_id}/competency-profile')
+def competency_profile_v2(student_id: int, stage: str = 'latest'):
+    from .competency_board import profile
+    try:
+        result = profile(student_id, stage)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, 'student not found')
+    return result
+
+
+@app.get('/api/v2/students/{student_id}/capabilities/{capability_code}')
+def capability_detail_v2(student_id: int, capability_code: str, stage: str = 'latest'):
+    from .competency_board import profile
+    try:
+        result = profile(student_id, stage, capability_code)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, 'student or capability not found')
+    return result
+
+
 @app.get("/api/v2/system/status")
 def system_status_v2() -> dict:
     from .admin_v2 import system_status

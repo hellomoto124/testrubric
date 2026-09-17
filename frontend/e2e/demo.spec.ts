@@ -16,7 +16,7 @@ test("V2 evidence to SSE scoring refreshes personal and school views", async ({ 
   await roles.getByRole("button", { name: "学生", exact: true }).click();
   await expect(page.getByLabel("模拟学生").getByRole("option")).toHaveCount(20);
   const targetSkill = page.locator(".skill-grid button").filter({ hasText: "YY.S38" });
-  await expect(targetSkill).toContainText("证据不足");
+  await expect(targetSkill).toContainText("475 分");
 
   await roles.getByRole("button", { name: "教师", exact: true }).click();
   await page.locator('input[type="file"]').setInputFiles({ name: "work.txt", mimeType: "text/plain", buffer: Buffer.from(fileEvidence) });

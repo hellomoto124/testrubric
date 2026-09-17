@@ -108,6 +108,9 @@ def initialize(rubric: dict) -> None:
                     )
         _seed_demo_assessments(connection, rubric["rubric_version"])
         _initialize_v2(connection)
+        from .competency_demo import seed_competency_demo
+
+        seed_competency_demo(connection)
 
 
 def _initialize_v2(connection):

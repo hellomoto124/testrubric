@@ -9,7 +9,7 @@ def test_startup_seeds_reproducible_non_official_demo_assessments():
 
         with connect() as connection:
             assert (
-                connection.execute("SELECT count(*) FROM evidence").fetchone()[0] == 60
+                connection.execute("SELECT count(*) FROM evidence").fetchone()[0] == 1220
             )
             assert (
                 connection.execute("SELECT count(*) FROM assessment_jobs").fetchone()[0]
@@ -85,7 +85,7 @@ def test_class_dashboard_profile_and_context_are_stable_and_missing_resources_ar
     assert profile.status_code == 200
     assert len(profile.json()["competencies"]) == 9
     assert len(profile.json()["skills"]) == 36
-    assert len(profile.json()["evidence_timeline"]) == 3
+    assert len(profile.json()["evidence_timeline"]) == 61
     assert missing_class.status_code == 404
     assert missing_student.status_code == 404
 

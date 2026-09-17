@@ -53,7 +53,7 @@ def _latest_results(connection, student_ids):
         WHERE j.student_id IN ("""
         + marks
         + """) AND j.status = 'succeeded'
-        ORDER BY CASE WHEN r.engine = 'seed_demo_v2' THEN 0 ELSE 1 END,
+        ORDER BY CASE WHEN r.engine = 'seed_demo_v2' THEN 0 WHEN r.engine = 'seed_kanban_v1' THEN 1 ELSE 2 END,
         j.id, r.revision""",
         student_ids,
     ).fetchall()
