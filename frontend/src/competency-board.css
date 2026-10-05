@@ -1,4 +1,11 @@
 .competency-board { --care:#b68131; --create:#3475a5; --learn:#248980; }
+.cohort-radar{background:white;border:1px solid #dbe5eb;border-radius:12px;padding:1.2rem;min-width:0}
+.cohort-radar-layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:center;gap:1rem}
+.cohort-chart{height:450px;width:100%;min-width:0}
+.cohort-goal-legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem}.cohort-goal-legend span:nth-child(1){color:#996922}.cohort-goal-legend span:nth-child(2){color:#3475a5}.cohort-goal-legend span:nth-child(3){color:#248980}
+.cohort-table-scroll{overflow:auto;min-width:0}.cohort-table-scroll table{width:100%;font-size:.8rem;border-collapse:collapse}.cohort-table-scroll th,.cohort-table-scroll td{padding:.55rem;border-bottom:1px solid #e1e8ed;text-align:left;white-space:nowrap}.cohort-table-scroll small{display:block;font-size:.65rem;color:#607686;font-weight:400}
+@media(max-width:1150px){.cohort-radar-layout{grid-template-columns:1fr}}
+@media(max-width:767px){.cohort-radar{padding:.7rem}.cohort-chart{height:350px}}
 .board-actions,.state-legend{display:flex;flex-wrap:wrap;gap:.5rem}
 .board-actions button[aria-pressed=true]{background:#164660;color:white}
 .board-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;padding:1rem;background:#f5f8fa;border:1px solid #e0e8ed;border-radius:12px;align-items:end}

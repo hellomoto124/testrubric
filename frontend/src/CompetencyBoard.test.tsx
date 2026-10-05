@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import {render,screen,fireEvent,cleanup,within} from '@testing-library/react';
 import {afterEach,expect,test,vi} from 'vitest';
-import CompetencyBoard,{tenCapabilityOption} from './CompetencyBoard';
+import CompetencyBoard,{tenCapabilityOption,cohortRadarOption} from './CompetencyBoard';
 
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 const names=['通情达理','公共参与','多元共生','明己励志','参与探究','解决问题','表达想法','学会学习','读懂世界','定量推理'];
@@ -12,6 +12,13 @@ test('ten-dimensional chart leaves unknown empty',()=>{
  const option=tenCapabilityOption(caps);
  expect((option.angleAxis as {data:string[]}).data).toHaveLength(10);
  expect((option.series as {data:{value:number|null}[]}[])[0].data[9].value).toBeNull();
+});
+test('cohort radar has ten school axes and never draws unknown as zero',()=>{
+ const complete=caps.map(c=>({...c,median_level:3,contributing_students:2}));
+ const option=cohortRadarOption(complete);
+ expect((option.radar as {indicator:unknown[]}).indicator).toHaveLength(10);
+ expect((option.series as {type:string;data:{value:number[]}[]}[])[0]).toMatchObject({type:'radar',data:[{value:Array(10).fill(3)}]});
+ expect(cohortRadarOption(complete.map((c,i)=>({...c,median_level:i===9?null:3}))).series).toEqual([]);
 });
 test('matrix groups ten school capabilities and opens scoped evidence request',async()=>{
  const mock=vi.fn(async(input:RequestInfo|URL)=>({ok:true,json:async()=>String(input).includes('/capabilities/')?{student:{id:1,name:'模拟学生01'},capability:caps[0],skills:[]}:{goals,students,stages:[],summary:{student_count:2,recorded_skills:20,missing_skills:40,review_skills:0},methodology:'按技能聚合'}}));

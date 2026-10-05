@@ -85,9 +85,22 @@ def _student(student, goals, latest):
 def board(class_id=None, name='', stage='latest'):
     with connect() as c:
         goals,latest,_=_load(c,stage)
-        students=[_student(s,goals,latest) for s in c.execute('''SELECT s.id,s.anonymous_id,cl.id,cl.name,s.is_simulated_test_data FROM students s JOIN classes cl ON cl.id=s.class_id WHERE (? IS NULL OR cl.id=?) ORDER BY s.id''',(class_id,class_id)) if name.casefold() in s[1].casefold()]
+        students=[_student(s,goals,latest) for s in c.execute('''SELECT s.id,s.anonymous_id,cl.id,cl.name,s.is_simulated_test_data FROM students s JOIN classes cl ON cl.id=s.class_id WHERE (? IS NULL OR cl.id=?) ORDER BY s.id''',(class_id,class_id))]
+    cohort_caps = []
+    for goal in goals:
+        for cap in goal['capabilities']:
+            members = [next(a for a in s['capabilities'] if a['code'] == cap['code']) for s in students]
+            levels = [m['median_level'] for m in members if m['median_level'] is not None]
+            total = sum(m['skill_count'] for m in members)
+            assessed = sum(m['assessed_count'] for m in members)
+            cohort_caps.append({k: cap[k] for k in ('code', 'name', 'goal_code', 'goal_name')} |
+                               {'median_level': _median(levels), 'contributing_students': len(levels),
+                                'assessed_count': assessed, 'skill_count': total,
+                                'coverage': assessed / total if total else 0})
+    cohort = {'student_count': len(students), 'capabilities': cohort_caps}
+    students = [s for s in students if name.casefold() in s['anonymous_id'].casefold()]
     counts=Counter(cap['state'] for s in students for cap in s['capabilities'])
-    return {'goals':goals,'students':students,'stage':stage,'stages':STAGE_OPTIONS,'state_counts':dict(counts),
+    return {'goals':goals,'students':students,'cohort':cohort,'stage':stage,'stages':STAGE_OPTIONS,'state_counts':dict(counts),
             'summary':{'student_count':len(students),'recorded_skills':sum(cap['recorded_count'] for s in students for cap in s['capabilities']),
                        'missing_skills':sum(cap['missing_count'] for s in students for cap in s['capabilities']),
                        'review_skills':sum(cap['review_count'] for s in students for cap in s['capabilities'])},

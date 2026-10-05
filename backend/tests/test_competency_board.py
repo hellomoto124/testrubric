@@ -38,6 +38,25 @@ def test_profile_exposes_rubric_evidence_and_comparable_history():
         assert client.get('/api/v2/students/1/capabilities/YY.C99').status_code == 404
 
 
+def test_cohort_radar_uses_student_medians_and_ignores_name_filter():
+    with TestClient(app) as client:
+        board = client.get('/api/v2/competency-board').json()
+        cohort = board['cohort']
+        assert cohort['student_count'] == 20
+        assert len(cohort['capabilities']) == 10
+        for cap in cohort['capabilities']:
+            members = [next(c for c in s['capabilities'] if c['code'] == cap['code']) for s in board['students']]
+            values = sorted(c['median_level'] for c in members if c['median_level'] is not None)
+            assert cap['median_level'] == values[(len(values)-1)//2]
+            assert cap['contributing_students'] == len(values)
+            assert cap['coverage'] == sum(c['assessed_count'] for c in members)/sum(c['skill_count'] for c in members)
+        assert client.get('/api/v2/competency-board?name=不存在').json()['cohort'] == cohort
+        assert client.get('/api/v2/competency-board?class_id=1').json()['cohort']['student_count'] == 7
+        empty = client.get('/api/v2/competency-board?class_id=999').json()['cohort']
+        assert empty['student_count'] == 0
+        assert all(c['median_level'] is None and c['coverage'] == 0 for c in empty['capabilities'])
+
+
 def test_seed_is_repeatable_and_does_not_attach_to_real_students():
     with TestClient(app):
         pass
